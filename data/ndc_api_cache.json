@@ -1,0 +1,626 @@
+{
+  "768.16": {
+    "status": 200,
+    "label": "邦楽--邦楽器--笛の類．管楽器",
+    "prefLabel": "笛の類．管楽器",
+    "broader": "768.1"
+  },
+  "768.11": {
+    "status": 200,
+    "label": "邦楽--邦楽器--三味線",
+    "prefLabel": "三味線",
+    "broader": "768.1"
+  },
+  "768.7": {
+    "status": 200,
+    "label": "邦楽--新日本音楽",
+    "prefLabel": "新日本音楽",
+    "broader": "768"
+  },
+  "768.2": {
+    "status": 200,
+    "label": "邦楽--雅楽．舞楽",
+    "prefLabel": "雅楽．舞楽",
+    "broader": "768"
+  },
+  "767.8": {
+    "status": 200,
+    "label": "声楽--歌謡曲．流行歌．シャンソン．ジャズソング",
+    "prefLabel": "歌謡曲．流行歌．シャンソン．ジャズソング",
+    "broader": "767"
+  },
+  "760": {
+    "status": 200,
+    "label": "音楽",
+    "prefLabel": "音楽",
+    "broader": "76"
+  },
+  "760.49": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "760.4": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "913.6": {
+    "status": 200,
+    "label": "日本文学--小説．物語--近代：明治以後",
+    "prefLabel": "近代：明治以後",
+    "broader": "913"
+  },
+  "210.02": {
+    "status": 200,
+    "label": "日本史--歴史補助学",
+    "prefLabel": "歴史補助学",
+    "broader": "210"
+  },
+  "768": {
+    "status": 200,
+    "label": "邦楽",
+    "prefLabel": "邦楽",
+    "broader": "760"
+  },
+  "798.5": {
+    "status": 200,
+    "label": "室内娯楽--テレビゲーム",
+    "prefLabel": "テレビゲーム",
+    "broader": "798"
+  },
+  "766.1": {
+    "status": 200,
+    "label": "劇音楽--オペラ［歌劇］．グランド オペラ",
+    "prefLabel": "オペラ［歌劇］．グランド オペラ",
+    "broader": "766"
+  },
+  "763.2": {
+    "status": 200,
+    "label": "楽器．器楽--ピアノ",
+    "prefLabel": "ピアノ",
+    "broader": "763"
+  },
+  "764.22": {
+    "status": 200,
+    "label": "器楽合奏--室内楽--二重奏",
+    "prefLabel": "二重奏",
+    "broader": "764.2"
+  },
+  "764": {
+    "status": 200,
+    "label": "器楽合奏",
+    "prefLabel": "器楽合奏",
+    "broader": "760"
+  },
+  "763.7": {
+    "status": 200,
+    "label": "楽器．器楽--木管楽器",
+    "prefLabel": "木管楽器",
+    "broader": "763"
+  },
+  "764.8": {
+    "status": 200,
+    "label": "器楽合奏--その他の合奏",
+    "prefLabel": "その他の合奏",
+    "broader": "764"
+  },
+  "767.4": {
+    "status": 200,
+    "label": "声楽--合唱［コーラス］．重唱",
+    "prefLabel": "合唱［コーラス］．重唱",
+    "broader": "767"
+  },
+  "764.26": {
+    "status": 200,
+    "label": "器楽合奏--室内楽--六重奏．七重奏．八重奏",
+    "prefLabel": "六重奏．七重奏．八重奏",
+    "broader": "764.2"
+  },
+  "188.8": {
+    "status": 200,
+    "label": "仏教--各宗--禅宗：臨済宗，曹洞宗，黄檗宗",
+    "prefLabel": "禅宗：臨済宗，曹洞宗，黄檗宗",
+    "broader": "188"
+  },
+  "768.21": {
+    "status": 200,
+    "label": "邦楽--雅楽．舞楽--舞楽．管弦",
+    "prefLabel": "舞楽．管弦",
+    "broader": "768.2"
+  },
+  "772.1": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（日本演劇）",
+    "broader": "772"
+  },
+  "773.7": {
+    "status": 200,
+    "label": "能楽．狂言--能囃子",
+    "prefLabel": "能囃子",
+    "broader": "773"
+  },
+  "763": {
+    "status": 200,
+    "label": "楽器．器楽",
+    "prefLabel": "楽器．器楽",
+    "broader": "760"
+  },
+  "764.7": {
+    "status": 200,
+    "label": "器楽合奏--軽音楽．ダンス音楽．ジャズ．ロック音楽",
+    "prefLabel": "軽音楽．ダンス音楽．ジャズ．ロック音楽",
+    "broader": "764"
+  },
+  "768.68": {
+    "status": 200,
+    "label": "邦楽--尺八音楽",
+    "prefLabel": "尺八音楽",
+    "broader": "768"
+  },
+  "764.35": {
+    "status": 200,
+    "label": "器楽合奏--管弦楽［オーケストラ］--序曲．前奏曲．間奏曲",
+    "prefLabel": "序曲．前奏曲．間奏曲",
+    "broader": "764.3"
+  },
+  "764.6": {
+    "status": 200,
+    "label": "器楽合奏--吹奏楽［バンド］",
+    "prefLabel": "吹奏楽［バンド］",
+    "broader": "764"
+  },
+  "768.1": {
+    "status": 200,
+    "label": "邦楽--邦楽器",
+    "prefLabel": "邦楽器",
+    "broader": "768"
+  },
+  "762.1": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（音楽 (日本)）",
+    "broader": "762"
+  },
+  "763.72": {
+    "status": 200,
+    "label": "楽器．器楽--木管楽器--フリュート．ピッコロ",
+    "prefLabel": "フリュート．ピッコロ",
+    "broader": "763.7"
+  },
+  "767.51": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "767.5": {
+    "status": 200,
+    "label": "声楽--民謡集．国民歌．国歌．祝祭歌",
+    "prefLabel": "民謡集．国民歌．国歌．祝祭歌",
+    "broader": "767"
+  },
+  "764.24": {
+    "status": 200,
+    "label": "器楽合奏--室内楽--四重奏：ピアノ四重奏，弦楽四重奏",
+    "prefLabel": "四重奏：ピアノ四重奏，弦楽四重奏",
+    "broader": "764.2"
+  },
+  "767.7": {
+    "status": 200,
+    "label": "声楽--学校唱歌．童謡",
+    "prefLabel": "学校唱歌．童謡",
+    "broader": "767"
+  },
+  "188.84": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（正法眼蔵［書名］）",
+    "broader": "188.8"
+  },
+  "773": {
+    "status": 200,
+    "label": "能楽．狂言",
+    "prefLabel": "能楽．狂言",
+    "broader": "770"
+  },
+  "764.69": {
+    "status": 200,
+    "label": "器楽合奏--吹奏楽［バンド］--ラッパ鼓隊．鼓笛隊",
+    "prefLabel": "ラッパ鼓隊．鼓笛隊",
+    "broader": "764.6"
+  },
+  "779.8": {
+    "status": 200,
+    "label": "大衆演芸--紙芝居",
+    "prefLabel": "紙芝居",
+    "broader": "779"
+  },
+  "778.21": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（日本映画）",
+    "broader": "778.2"
+  },
+  "764.23": {
+    "status": 200,
+    "label": "器楽合奏--室内楽--三重奏：ピアノ三重奏，弦楽三重奏",
+    "prefLabel": "三重奏：ピアノ三重奏，弦楽三重奏",
+    "broader": "764.2"
+  },
+  "764.25": {
+    "status": 200,
+    "label": "器楽合奏--室内楽--五重奏：ピアノ五重奏，弦楽五重奏，管弦五重奏",
+    "prefLabel": "五重奏：ピアノ五重奏，弦楽五重奏，管弦五重奏",
+    "broader": "764.2"
+  },
+  "762": {
+    "status": 200,
+    "label": "音楽史．各国の音楽",
+    "prefLabel": "音楽史．各国の音楽",
+    "broader": "760"
+  },
+  "768.12": {
+    "status": 200,
+    "label": "邦楽--邦楽器--琴．一弦琴［須磨琴］．二弦琴［八雲琴］．大正琴",
+    "prefLabel": "琴．一弦琴［須磨琴］．二弦琴［八雲琴］．大正琴",
+    "broader": "768.1"
+  },
+  "798": {
+    "status": 200,
+    "label": "室内娯楽",
+    "prefLabel": "室内娯楽",
+    "broader": "790"
+  },
+  "793": {
+    "status": 200,
+    "label": "花道",
+    "prefLabel": "花道",
+    "broader": "790"
+  },
+  "767": {
+    "status": 200,
+    "label": "声楽",
+    "prefLabel": "声楽",
+    "broader": "760"
+  },
+  "779.13": {
+    "status": 200,
+    "label": "大衆演芸--寄席--落語",
+    "prefLabel": "落語",
+    "broader": "779.1"
+  },
+  "760.7": {
+    "status": 200,
+    "label": "音楽--研究法．指導法．音楽教育",
+    "prefLabel": "研究法．指導法．音楽教育",
+    "broader": "760"
+  },
+  "763.6": {
+    "status": 200,
+    "label": "楽器．器楽--吹奏楽器．金管楽器",
+    "prefLabel": "吹奏楽器．金管楽器",
+    "broader": "763"
+  },
+  "768.163": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "766": {
+    "status": 200,
+    "label": "劇音楽",
+    "prefLabel": "劇音楽",
+    "broader": "760"
+  },
+  "770": {
+    "status": 200,
+    "label": "演劇",
+    "prefLabel": "演劇",
+    "broader": "77"
+  },
+  "764.3": {
+    "status": 200,
+    "label": "器楽合奏--管弦楽［オーケストラ］",
+    "prefLabel": "管弦楽［オーケストラ］",
+    "broader": "764"
+  },
+  "768.58": {
+    "status": 200,
+    "label": "邦楽--三味線曲．浄瑠璃．義太夫--長唄［江戸長唄］．荻江節",
+    "prefLabel": "長唄［江戸長唄］．荻江節",
+    "broader": "768.5"
+  },
+  "763.63": {
+    "status": 200,
+    "label": "楽器．器楽--吹奏楽器．金管楽器--トランペット",
+    "prefLabel": "トランペット",
+    "broader": "763.6"
+  },
+  "767.08": {
+    "status": 200,
+    "label": "声楽--歌曲集",
+    "prefLabel": "歌曲集",
+    "broader": "767"
+  },
+  "775.4": {
+    "status": 200,
+    "label": "各種の演劇--レビュー．少女歌劇．ミュージカル",
+    "prefLabel": "レビュー．少女歌劇．ミュージカル",
+    "broader": "775"
+  },
+  "770.49": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "770.4": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（演劇批評，劇評）",
+    "broader": "770"
+  },
+  "762.346": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "762.34": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（ドイツ音楽）",
+    "broader": "762.3"
+  },
+  "767.3": {
+    "status": 200,
+    "label": "声楽--独唱",
+    "prefLabel": "独唱",
+    "broader": "767"
+  },
+  "763.73": {
+    "status": 200,
+    "label": "楽器．器楽--木管楽器--クラリネット．バセット ホルン",
+    "prefLabel": "クラリネット．バセット ホルン",
+    "broader": "763.7"
+  },
+  "777.1": {
+    "status": 200,
+    "label": "人形劇--人形浄瑠璃",
+    "prefLabel": "人形浄瑠璃",
+    "broader": "777"
+  },
+  "768.15": {
+    "status": 200,
+    "label": "邦楽--邦楽器--尺八",
+    "prefLabel": "尺八",
+    "broader": "768.1"
+  },
+  "763.74": {
+    "status": 200,
+    "label": "楽器．器楽--木管楽器--サキソフォン",
+    "prefLabel": "サキソフォン",
+    "broader": "763.7"
+  },
+  "175.914": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "175.91": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "175.9": {
+    "status": 200,
+    "label": "神社．神職--神社誌．神社縁起",
+    "prefLabel": "神社誌．神社縁起",
+    "broader": "175"
+  },
+  "778.77": {
+    "status": 200,
+    "label": "映画--各種映画：科学映画，記録映画，教育映画--漫画映画．アニメーション［動画］",
+    "prefLabel": "漫画映画．アニメーション［動画］",
+    "broader": "778.7"
+  },
+  "175.951": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "175.95": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "764.67": {
+    "status": 200,
+    "label": "器楽合奏--吹奏楽［バンド］--舞曲",
+    "prefLabel": "舞曲",
+    "broader": "764.6"
+  },
+  "764.2": {
+    "status": 200,
+    "label": "器楽合奏--室内楽",
+    "prefLabel": "室内楽",
+    "broader": "764"
+  },
+  "764.65": {
+    "status": 200,
+    "label": "器楽合奏--吹奏楽［バンド］--序曲",
+    "prefLabel": "序曲",
+    "broader": "764.6"
+  },
+  "188.992": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "188.99": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "188.9": {
+    "status": 200,
+    "label": "仏教--各宗--日蓮宗",
+    "prefLabel": "日蓮宗",
+    "broader": "188"
+  },
+  "767.538": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "767.53": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "762.3": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（西洋音楽）",
+    "broader": "762"
+  },
+  "768.17": {
+    "status": 200,
+    "label": "邦楽--邦楽器--太鼓．鼓の類",
+    "prefLabel": "太鼓．鼓の類",
+    "broader": "768.1"
+  },
+  "768.3": {
+    "status": 200,
+    "label": "邦楽--琵琶楽：盲僧琵琶，平家琵琶［平曲］，薩摩琵琶，筑前琵琶",
+    "prefLabel": "琵琶楽：盲僧琵琶，平家琵琶［平曲］，薩摩琵琶，筑前琵琶",
+    "broader": "768"
+  },
+  "188.82": {
+    "status": 200,
+    "label": "",
+    "prefLabel": "（道元）",
+    "broader": "188.8"
+  },
+  "178.83": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "178.8": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "178": {
+    "status": 200,
+    "label": "各教派．教派神道",
+    "prefLabel": "各教派．教派神道",
+    "broader": "170"
+  },
+  "768.038": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "768.03": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "768.0": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "775.2": {
+    "status": 200,
+    "label": "各種の演劇--喜劇．軽演劇",
+    "prefLabel": "喜劇．軽演劇",
+    "broader": "775"
+  },
+  "768.02": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "768.6": {
+    "status": 200,
+    "label": "邦楽--筝曲．琴歌",
+    "prefLabel": "筝曲．琴歌",
+    "broader": "768"
+  },
+  "774": {
+    "status": 200,
+    "label": "歌舞伎",
+    "prefLabel": "歌舞伎",
+    "broader": "770"
+  },
+  "772": {
+    "status": 200,
+    "label": "演劇史．各国の演劇",
+    "prefLabel": "演劇史．各国の演劇",
+    "broader": "770"
+  },
+  "779": {
+    "status": 200,
+    "label": "大衆演芸",
+    "prefLabel": "大衆演芸",
+    "broader": "77"
+  },
+  "175": {
+    "status": 200,
+    "label": "神社．神職",
+    "prefLabel": "神社．神職",
+    "broader": "170"
+  },
+  "188": {
+    "status": 200,
+    "label": "仏教--各宗",
+    "prefLabel": "各宗",
+    "broader": "180"
+  },
+  "768.166": {
+    "status": 500,
+    "label": "",
+    "prefLabel": "",
+    "broader": ""
+  },
+  "778": {
+    "status": 200,
+    "label": "映画",
+    "prefLabel": "映画",
+    "broader": "77"
+  },
+  "775": {
+    "status": 200,
+    "label": "各種の演劇",
+    "prefLabel": "各種の演劇",
+    "broader": "770"
+  },
+  "777": {
+    "status": 200,
+    "label": "人形劇",
+    "prefLabel": "人形劇",
+    "broader": "770"
+  }
+}

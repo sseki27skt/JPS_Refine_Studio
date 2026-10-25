@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Japan Search から抽出・クレンジングされたドメイン資料の対話型デジタルアーカイブポータル">
+    <title>Digital Archive Explorer | 文化資源メタデータ検索</title>
+    
+    <!-- Google Fonts: Outfit, Inter & Noto Sans JP -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header class="hero-header">
+        <div class="header-actions">
+            <button id="btn-theme-toggle" class="btn-icon" title="テーマ切り替え">☀️</button>
+        </div>
+        <span class="hero-badge">Japan Search Cleansed Collection</span>
+        <h1 class="hero-title" id="app-portal-title">Digital Archive Explorer</h1>
+        <p class="hero-subtitle" id="app-portal-subtitle">高精度にクレンジングされた文化資源メタデータのファセット検索・対話的分析ポータル</p>
+    </header>
+
+    <!-- Analytics Dashboard Container -->
+    <div class="dashboard-container">
+        <div class="dashboard-card">
+            <div class="chart-wrapper">
+                <canvas id="categoryChart"></canvas>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-match-count">0</div>
+                <div class="stat-label">検索ヒット件数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-total-count">0</div>
+                <div class="stat-label">総登録資料件数</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Layout -->
+    <main class="main-layout">
+        <!-- Left Filter Sidebar -->
+        <aside class="filter-sidebar">
+            <div class="sidebar-card">
+                <div class="search-input-box">
+                    <span class="search-icon-left">🔍</span>
+                    <input type="text" id="input-keyword-search" placeholder="タイトル、説明文、著者などから検索...">
+                </div>
+
+                <div class="filter-group">
+                    <div class="filter-group-title">カテゴリ / ジャンル</div>
+                    <div class="checkbox-list" id="container-genre-filters">
+                        <!-- 動的に生成 -->
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <div class="filter-group-title">所蔵元・提供機関</div>
+                    <div class="checkbox-list" id="container-provider-filters">
+                        <!-- 動的に生成 -->
+                    </div>
+                </div>
+
+                <div class="filter-group">
+                    <div class="filter-group-title">属性 / 使用タグ</div>
+                    <div class="checkbox-list" id="container-attribute-filters">
+                        <!-- 動的に生成 -->
+                    </div>
+                </div>
+
+                <button id="btn-reset-filters" class="btn-secondary">条件をクリア</button>
+            </div>
+        </aside>
+
+        <!-- Right Results Content Area -->
+        <section class="results-area">
+            <div class="results-header">
+                <div class="results-count">
+                    該当資料: <strong id="lbl-match-count">0</strong> 件 / 全 <span id="lbl-total-count">0</span> 件
+                </div>
+                <div class="sort-select-wrapper">
+                    <select id="select-sort">
+                        <option value="title-asc">タイトル昇順 (A-Z / あ-ん)</option>
+                        <option value="title-desc">タイトル降順 (Z-A / ん-あ)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Card Grid Area -->
+            <div id="cards-grid" class="cards-grid">
+                <!-- JSで動的にカードが挿入されます -->
+            </div>
+
+            <!-- Pagination Container -->
+            <div class="pagination-wrapper" id="container-pagination">
+                <!-- 動的にページボタンが生成されます -->
+            </div>
+        </section>
+    </main>
+
+    <!-- Detail & IIIF Modal Overlay -->
+    <div id="modal-detail" class="modal-overlay">
+        <div class="modal-window">
+            <button id="btn-modal-close" class="modal-close-btn">&times;</button>
+            <div class="card-tag" id="modal-item-tag">ジャンル</div>
+            <h2 class="modal-header-title" id="modal-item-title">資料タイトル</h2>
+            
+            <div class="modal-media-container" id="modal-media-wrapper">
+                <img id="modal-item-image" src="" alt="資料プレビュー" class="hide">
+                <div id="modal-image-placeholder" style="color: var(--text-muted);">画像なし / プレビュー未取得</div>
+            </div>
+
+            <div style="margin-bottom: 1.5rem;">
+                <p id="modal-item-description" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;"></p>
+            </div>
+
+            <div style="display: flex; gap: 1rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+                <a id="link-external-source" href="#" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="text-align: center; text-decoration: none; display: inline-block;">Japan Search で見る ↗</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Core Script -->
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,719 @@
+{
+  "001129691": {
+    "status": 200,
+    "label": "春風亭, 一之輔, 1978-",
+    "prefLabel": "春風亭, 一之輔, 1978-",
+    "altLabel": [
+      "川上, 隼一"
+    ]
+  },
+  "00450717": {
+    "status": 200,
+    "label": "Mozart, Wolfgang Amadeus, 1756-1791",
+    "prefLabel": "Mozart, Wolfgang Amadeus, 1756-1791",
+    "altLabel": [
+      "モーツァルト, W. A",
+      "モーツァルト",
+      "モオツァルト"
+    ]
+  },
+  "00206529": {
+    "status": 200,
+    "label": "中村, 錦之助, 1932-1997",
+    "prefLabel": "中村, 錦之助, 1932-1997",
+    "altLabel": [
+      "小川, 衿一郎",
+      "小川, 錦一"
+    ]
+  },
+  "00981679": {
+    "status": 200,
+    "label": "もく, まさあき, 1942-",
+    "prefLabel": "もく, まさあき, 1942-",
+    "altLabel": []
+  },
+  "00373068": {
+    "status": 200,
+    "label": "田村, 大三, 1913-2010",
+    "prefLabel": "田村, 大三, 1913-2010",
+    "altLabel": []
+  },
+  "00642004": {
+    "status": 200,
+    "label": "笛吹川",
+    "prefLabel": "笛吹川",
+    "altLabel": []
+  },
+  "001337038": {
+    "status": 200,
+    "label": "戸田, 海笛, 1888-1931",
+    "prefLabel": "戸田, 海笛, 1888-1931",
+    "altLabel": [
+      "戸田, 久輝"
+    ]
+  },
+  "00619258": {
+    "status": 200,
+    "label": "慈眼寺 (笛吹市)",
+    "prefLabel": "慈眼寺 (笛吹市)",
+    "altLabel": [
+      "慈眼寺 (山梨県一宮町)"
+    ]
+  },
+  "033899239": {
+    "status": 200,
+    "label": "なつかしき笛や太鼓 (映画)",
+    "prefLabel": "なつかしき笛や太鼓 (映画)",
+    "altLabel": []
+  },
+  "001220694": {
+    "status": 200,
+    "label": "子供の魔法の角笛",
+    "prefLabel": "子供の魔法の角笛",
+    "altLabel": [
+      "少年の魔法の角笛",
+      "Des Knaben Wunderhorn"
+    ]
+  },
+  "00654528": {
+    "status": 200,
+    "label": "国分寺 (笛吹市)",
+    "prefLabel": "国分寺 (笛吹市)",
+    "altLabel": [
+      "国分寺 (甲斐国)",
+      "甲斐国分寺"
+    ]
+  },
+  "01208000": {
+    "status": 200,
+    "label": "笛吹市--歴史--写真集",
+    "prefLabel": "笛吹市--歴史--写真集",
+    "altLabel": []
+  },
+  "01023785": {
+    "status": 200,
+    "label": "笛吹, 孝治",
+    "prefLabel": "笛吹, 孝治",
+    "altLabel": []
+  },
+  "00504350": {
+    "status": 200,
+    "label": "土肥, 春曙, 1869-1915",
+    "prefLabel": "土肥, 春曙, 1869-1915",
+    "altLabel": [
+      "土肥, 庸元"
+    ]
+  },
+  "001230924": {
+    "status": 200,
+    "label": "岩田, 英憲",
+    "prefLabel": "岩田, 英憲",
+    "altLabel": [
+      "岩田, 英憲"
+    ]
+  },
+  "033899244": {
+    "status": 200,
+    "label": "丸亀市立小手島中学校",
+    "prefLabel": "丸亀市立小手島中学校",
+    "altLabel": [
+      "小手島中学校"
+    ]
+  },
+  "01210364": {
+    "status": 200,
+    "label": "歌笛神社 (北海道新ひだか町)",
+    "prefLabel": "歌笛神社 (北海道新ひだか町)",
+    "altLabel": []
+  },
+  "00056129": {
+    "status": 200,
+    "label": "乃木, 希典, 1849-1912",
+    "prefLabel": "乃木, 希典, 1849-1912",
+    "altLabel": []
+  },
+  "01189696": {
+    "status": 200,
+    "label": "小川, 笙船, 1672-1760",
+    "prefLabel": "小川, 笙船, 1672-1760",
+    "altLabel": [
+      "小川, 広正",
+      "雲語"
+    ]
+  },
+  "00123792": {
+    "status": 200,
+    "label": "横山, 祖道, 1907-1980",
+    "prefLabel": "横山, 祖道, 1907-1980",
+    "altLabel": []
+  },
+  "00636362": {
+    "status": 200,
+    "label": "鹿笛吟社",
+    "prefLabel": "鹿笛吟社",
+    "altLabel": []
+  },
+  "00213559": {
+    "status": 200,
+    "label": "笙野, 頼子, 1956-",
+    "prefLabel": "笙野, 頼子, 1956-",
+    "altLabel": []
+  },
+  "001310405": {
+    "status": 200,
+    "label": "出口, 常順, 1900-1994",
+    "prefLabel": "出口, 常順, 1900-1994",
+    "altLabel": []
+  },
+  "031766731": {
+    "status": 200,
+    "label": "笛吹市--歴史--近代--写真集",
+    "prefLabel": "笛吹市--歴史--近代--写真集",
+    "altLabel": []
+  },
+  "01130773": {
+    "status": 200,
+    "label": "笛吹市--歴史",
+    "prefLabel": "笛吹市--歴史",
+    "altLabel": []
+  },
+  "00627722": {
+    "status": 200,
+    "label": "魔笛",
+    "prefLabel": "魔笛",
+    "altLabel": []
+  },
+  "00038567": {
+    "status": 200,
+    "label": "草笛, 光子, 1933-",
+    "prefLabel": "草笛, 光子, 1933-",
+    "altLabel": [
+      "栗田, 光子"
+    ]
+  },
+  "00621444": {
+    "status": 200,
+    "label": "Schikaneder, Emanuel, 1751-1812",
+    "prefLabel": "Schikaneder, Emanuel, 1751-1812",
+    "altLabel": [
+      "シカネーダー, エマヌエル"
+    ]
+  },
+  "001329916": {
+    "status": 200,
+    "label": "中谷, 明, 1932-",
+    "prefLabel": "中谷, 明, 1932-",
+    "altLabel": []
+  },
+  "001187959": {
+    "status": 200,
+    "label": "山梨県立笛吹高等学校",
+    "prefLabel": "山梨県立笛吹高等学校",
+    "altLabel": [
+      "笛吹高等学校",
+      "Fuefuki High School"
+    ]
+  },
+  "00119148": {
+    "status": 200,
+    "label": "原, 笙子, 1933-2005",
+    "prefLabel": "原, 笙子, 1933-2005",
+    "altLabel": [
+      "糸井, 治子"
+    ]
+  },
+  "00427064": {
+    "status": 200,
+    "label": "青葉, 笙子, 1918-2012",
+    "prefLabel": "青葉, 笙子, 1918-2012",
+    "altLabel": [
+      "小野寺, 貞子"
+    ]
+  },
+  "01142539": {
+    "status": 200,
+    "label": "石笛読書サークル",
+    "prefLabel": "石笛読書サークル",
+    "altLabel": []
+  },
+  "01168207": {
+    "status": 200,
+    "label": "笛吹市医師会",
+    "prefLabel": "笛吹市医師会",
+    "altLabel": [
+      "東八代郡医師会"
+    ]
+  },
+  "032805034": {
+    "status": 200,
+    "label": "笛吹川沿岸土地改良区",
+    "prefLabel": "笛吹川沿岸土地改良区",
+    "altLabel": []
+  },
+  "00639883": {
+    "status": 200,
+    "label": "草笛学園",
+    "prefLabel": "草笛学園",
+    "altLabel": []
+  },
+  "00757524": {
+    "status": 200,
+    "label": "吉沢, 実, 1950-",
+    "prefLabel": "吉沢, 実, 1950-",
+    "altLabel": [
+      "吉澤, 実"
+    ]
+  },
+  "00645037": {
+    "status": 200,
+    "label": "函館大妻高等学校吹奏楽部",
+    "prefLabel": "函館大妻高等学校吹奏楽部",
+    "altLabel": []
+  },
+  "00324247": {
+    "status": 200,
+    "label": "鯉沼, 広行, 1943-",
+    "prefLabel": "鯉沼, 広行, 1943-",
+    "altLabel": []
+  },
+  "001160654": {
+    "status": 200,
+    "label": "笛吹市--地図",
+    "prefLabel": "笛吹市--地図",
+    "altLabel": []
+  },
+  "01003466": {
+    "status": 200,
+    "label": "日高囃笛の会",
+    "prefLabel": "日高囃笛の会",
+    "altLabel": []
+  },
+  "01105825": {
+    "status": 200,
+    "label": "笛吹市--遺跡・遺物",
+    "prefLabel": "笛吹市--遺跡・遺物",
+    "altLabel": []
+  },
+  "001181890": {
+    "status": 200,
+    "label": "春日神社 (笛吹市)",
+    "prefLabel": "春日神社 (笛吹市)",
+    "altLabel": []
+  },
+  "00149119": {
+    "status": 200,
+    "label": "北川, 笙子, 1920-",
+    "prefLabel": "北川, 笙子, 1920-",
+    "altLabel": []
+  },
+  "00448526": {
+    "status": 200,
+    "label": "Mahler, Gustav, 1860-1911",
+    "prefLabel": "Mahler, Gustav, 1860-1911",
+    "altLabel": [
+      "マーラー, グスタフ",
+      "マーラー, グスターフ",
+      "マーラー"
+    ]
+  },
+  "00504581": {
+    "status": 200,
+    "label": "東儀, 鉄笛, 1869-1925",
+    "prefLabel": "東儀, 鉄笛, 1869-1925",
+    "altLabel": []
+  },
+  "01185937": {
+    "status": 200,
+    "label": "篠笛",
+    "prefLabel": "篠笛",
+    "altLabel": [
+      "Shinobue"
+    ]
+  },
+  "00576136": {
+    "status": 200,
+    "label": "笛",
+    "prefLabel": "笛",
+    "altLabel": [
+      "能管",
+      "Whistles",
+      "Flute"
+    ]
+  },
+  "00564452": {
+    "status": 200,
+    "label": "オペラ",
+    "prefLabel": "オペラ",
+    "altLabel": [
+      "歌劇",
+      "Opera"
+    ]
+  },
+  "00571169": {
+    "status": 200,
+    "label": "神道",
+    "prefLabel": "神道",
+    "altLabel": [
+      "Shinto"
+    ]
+  },
+  "01180318": {
+    "status": 200,
+    "label": "篳篥",
+    "prefLabel": "篳篥",
+    "altLabel": [
+      "Hichiriki"
+    ]
+  },
+  "00568850": {
+    "status": 200,
+    "label": "音楽--沖縄県",
+    "prefLabel": "音楽--沖縄県",
+    "altLabel": [
+      "音楽 (琉球)",
+      "琉球音楽"
+    ]
+  },
+  "00562095": {
+    "status": 200,
+    "label": "雅楽 (日本)",
+    "prefLabel": "雅楽 (日本)",
+    "altLabel": [
+      "Gagaku"
+    ]
+  },
+  "001205578": {
+    "status": 200,
+    "label": "臨済宗--語録",
+    "prefLabel": "臨済宗--語録",
+    "altLabel": []
+  },
+  "00658660": {
+    "status": 200,
+    "label": "大正琴",
+    "prefLabel": "大正琴",
+    "altLabel": [
+      "大正琴"
+    ]
+  },
+  "00567105": {
+    "status": 200,
+    "label": "郷土玩具",
+    "prefLabel": "郷土玩具",
+    "altLabel": []
+  },
+  "00562163": {
+    "status": 200,
+    "label": "楽器",
+    "prefLabel": "楽器",
+    "altLabel": [
+      "Musical instruments"
+    ]
+  },
+  "00564018": {
+    "status": 200,
+    "label": "いけばな",
+    "prefLabel": "いけばな",
+    "altLabel": [
+      "花道",
+      "盛花",
+      "生花"
+    ]
+  },
+  "00574610": {
+    "status": 200,
+    "label": "禅宗--感想・説教",
+    "prefLabel": "禅宗--感想・説教",
+    "altLabel": [
+      "臨済宗--感想・説教",
+      "曹洞宗--感想・説教",
+      "黄檗宗--感想・説教"
+    ]
+  },
+  "00573294": {
+    "status": 200,
+    "label": "トランペット",
+    "prefLabel": "トランペット",
+    "altLabel": [
+      "Trumpet"
+    ]
+  },
+  "00569382": {
+    "status": 200,
+    "label": "リコーダー",
+    "prefLabel": "リコーダー",
+    "altLabel": [
+      "レコーダ (楽器)",
+      "レコーダー (楽器)",
+      "リコーダ (楽器)"
+    ]
+  },
+  "00563763": {
+    "status": 200,
+    "label": "フリーメーソン",
+    "prefLabel": "フリーメーソン",
+    "altLabel": [
+      "Freemasons"
+    ]
+  },
+  "01061854": {
+    "status": 200,
+    "label": "オペラ--あらすじ",
+    "prefLabel": "オペラ--あらすじ",
+    "altLabel": [
+      "歌劇--あらすじ"
+    ]
+  },
+  "00583840": {
+    "status": 200,
+    "label": "映画--日本",
+    "prefLabel": "映画--日本",
+    "altLabel": []
+  },
+  "00568516": {
+    "status": 200,
+    "label": "人形浄瑠璃",
+    "prefLabel": "人形浄瑠璃",
+    "altLabel": [
+      "文楽",
+      "Bunraku",
+      "Joruri--Texts"
+    ]
+  },
+  "001215807": {
+    "status": 200,
+    "label": "和楽器",
+    "prefLabel": "和楽器",
+    "altLabel": [
+      "邦楽器",
+      "Musical instruments--Japan"
+    ]
+  },
+  "00575880": {
+    "status": 200,
+    "label": "音律",
+    "prefLabel": "音律",
+    "altLabel": [
+      "Musical temperament"
+    ]
+  },
+  "00571937": {
+    "status": 200,
+    "label": "尺八",
+    "prefLabel": "尺八",
+    "altLabel": [
+      "Shakuhachi"
+    ]
+  },
+  "00568883": {
+    "status": 200,
+    "label": "音響学",
+    "prefLabel": "音響学",
+    "altLabel": []
+  },
+  "01198663": {
+    "status": 200,
+    "label": "サクソフォーン--歴史",
+    "prefLabel": "サクソフォーン--歴史",
+    "altLabel": []
+  },
+  "001288289": {
+    "status": 200,
+    "label": "雅楽 (日本)--歴史",
+    "prefLabel": "雅楽 (日本)--歴史",
+    "altLabel": []
+  },
+  "01124420": {
+    "status": 200,
+    "label": "音楽--日本--歴史--明治時代",
+    "prefLabel": "音楽--日本--歴史--明治時代",
+    "altLabel": []
+  },
+  "001128611": {
+    "status": 200,
+    "label": "鼓笛隊--日本--歴史--明治時代",
+    "prefLabel": "鼓笛隊--日本--歴史--明治時代",
+    "altLabel": []
+  },
+  "00572937": {
+    "status": 200,
+    "label": "鉄道唱歌",
+    "prefLabel": "鉄道唱歌",
+    "altLabel": [
+      "鉄道歌",
+      "Railroads--Songs and music"
+    ]
+  },
+  "01021738": {
+    "status": 200,
+    "label": "アニメーション--アメリカ合衆国--歴史",
+    "prefLabel": "アニメーション--アメリカ合衆国--歴史",
+    "altLabel": []
+  },
+  "00572614": {
+    "status": 200,
+    "label": "竹",
+    "prefLabel": "竹",
+    "altLabel": [
+      "竹亜科",
+      "Bamboo"
+    ]
+  },
+  "034176532": {
+    "status": 200,
+    "label": "民謡--ロシア--歴史--ソビエト連邦時代",
+    "prefLabel": "民謡--ロシア--歴史--ソビエト連邦時代",
+    "altLabel": []
+  },
+  "01178425": {
+    "status": 200,
+    "label": "プロパガンダ",
+    "prefLabel": "プロパガンダ",
+    "altLabel": [
+      "宣伝 (戦争)",
+      "政治宣伝",
+      "Propaganda"
+    ]
+  },
+  "01035660": {
+    "status": 200,
+    "label": "流行歌--日本--歴史--1945-",
+    "prefLabel": "流行歌--日本--歴史--1945-",
+    "altLabel": []
+  },
+  "00615117": {
+    "status": 200,
+    "label": "謡曲--叢書",
+    "prefLabel": "謡曲--叢書",
+    "altLabel": []
+  },
+  "00568868": {
+    "status": 200,
+    "label": "音楽教育",
+    "prefLabel": "音楽教育",
+    "altLabel": [
+      "Music--Instruction and study"
+    ]
+  },
+  "00598532": {
+    "status": 200,
+    "label": "神道--便覧",
+    "prefLabel": "神道--便覧",
+    "altLabel": []
+  },
+  "00616881": {
+    "status": 200,
+    "label": "天理教",
+    "prefLabel": "天理教",
+    "altLabel": [
+      "Tenrikyo"
+    ]
+  },
+  "00586577": {
+    "status": 200,
+    "label": "楽譜--歴史",
+    "prefLabel": "楽譜--歴史",
+    "altLabel": []
+  },
+  "00584599": {
+    "status": 200,
+    "label": "音楽 (日本)--歴史",
+    "prefLabel": "音楽 (日本)--歴史",
+    "altLabel": [
+      "邦楽--歴史",
+      "日本音楽--歴史"
+    ]
+  },
+  "00568825": {
+    "status": 200,
+    "label": "音楽",
+    "prefLabel": "音楽",
+    "altLabel": [
+      "Music"
+    ]
+  },
+  "00584260": {
+    "status": 200,
+    "label": "演劇--オーストリア--歴史",
+    "prefLabel": "演劇--オーストリア--歴史",
+    "altLabel": [
+      "演劇 (オーストリア)--歴史"
+    ]
+  },
+  "00585222": {
+    "status": 200,
+    "label": "オペラ--歴史",
+    "prefLabel": "オペラ--歴史",
+    "altLabel": [
+      "歌劇--歴史"
+    ]
+  },
+  "00572079": {
+    "status": 200,
+    "label": "唱歌",
+    "prefLabel": "唱歌",
+    "altLabel": []
+  },
+  "00561739": {
+    "status": 200,
+    "label": "童謡",
+    "prefLabel": "童謡",
+    "altLabel": [
+      "わらべ唄",
+      "Children's songs"
+    ]
+  },
+  "00560932": {
+    "status": 200,
+    "label": "舞楽",
+    "prefLabel": "舞楽",
+    "altLabel": [
+      "Bugaku"
+    ]
+  },
+  "00565702": {
+    "status": 200,
+    "label": "器楽",
+    "prefLabel": "器楽",
+    "altLabel": [
+      "Instrumental music"
+    ]
+  },
+  "00584590": {
+    "status": 200,
+    "label": "音楽 (西洋)--歴史",
+    "prefLabel": "音楽 (西洋)--歴史",
+    "altLabel": [
+      "西洋音楽--歴史"
+    ]
+  },
+  "00568874": {
+    "status": 200,
+    "label": "音楽と社会",
+    "prefLabel": "音楽と社会",
+    "altLabel": [
+      "社会と音楽",
+      "Music--Social aspects"
+    ]
+  },
+  "00572538": {
+    "status": 200,
+    "label": "太鼓",
+    "prefLabel": "太鼓",
+    "altLabel": [
+      "和太鼓",
+      "ドラム",
+      "Drum"
+    ]
+  },
+  "00576764": {
+    "status": 200,
+    "label": "民族音楽",
+    "prefLabel": "民族音楽",
+    "altLabel": [
+      "音楽民族学",
+      "民族音楽学",
+      "Folk music"
+    ]
+  }
+}

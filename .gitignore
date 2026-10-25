@@ -1,0 +1,66 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Streamlit logs & cache
+01_cleansing_studio/logs/*.log
+logs/*.log
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Large intermediate datasets / Temporary pipeline outputs
+# （軽量なキャッシュ・確定ルール・出力結果以外の大容量中間データを除外）
+data/*.jsonl
+!data/confirmed_ok_rules.jsonl
+data/discarded_*.csv
+data/tmp_*.jsonl
+data/test_build.jsonl
+data/raw_metadata.jsonl
+data/type_filtered.jsonl
+data/about_filtered.jsonl
+data/ngram_filtered.jsonl
+data/target_for_llm.jsonl
+data/llm_judgments.jsonl
