@@ -11,7 +11,10 @@ import re
 import time
 import urllib.parse
 import requests
-from .logger import logger
+try:
+    from .logger import logger
+except (ImportError, ValueError):
+    from logger import logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:

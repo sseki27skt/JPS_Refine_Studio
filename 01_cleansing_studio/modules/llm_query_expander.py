@@ -9,7 +9,10 @@ import os
 import re
 from collections import defaultdict
 import requests
-from .logger import logger
+try:
+    from .logger import logger
+except (ImportError, ValueError):
+    from logger import logger
 
 DEFAULT_LLM_URL = os.environ.get("LLM_API_BASE", "http://localhost:1234/v1")
 DEFAULT_MODEL = os.environ.get("LLM_MODEL", "local-model")
@@ -821,7 +824,7 @@ def _build_fallback_result(theme_prompt: str, reason: str) -> dict:
     }
 
 
-def generate_sparql_queries(expansion_result: dict) -> list:
+def generate_sparql_queries(expansion_result: dict, limit: int = None, **kwargs) -> list:
     """
     SPARQLクエリ一覧の自動生成 (Recall 最大化 ＆ 504 Timeout 回避チャンク分割 ＆ NDC除外フィルタ対応仕様)
     - rdf:type 絞り込みを排除し全RDFリソースを検索。

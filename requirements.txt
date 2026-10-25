@@ -148,3 +148,4 @@ zipp==3.23.0
 ddgs
 lxml==6.1.1
 primp==0.15.0
+duckdb==2.0.0

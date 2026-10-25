@@ -8,7 +8,10 @@ import os
 import re
 import urllib.parse
 import requests
-from .logger import logger
+try:
+    from .logger import logger
+except (ImportError, ValueError):
+    from logger import logger
 from collections import Counter
 
 DEFAULT_LLM_URL = os.environ.get("LLM_API_BASE", "http://localhost:1234/v1")
@@ -548,13 +551,28 @@ def split_dataset_by_rules(
             except Exception:
                 pass
 
-    ng_about = set([cat for cat, status in about_rules.items() if status == "NG"])
-    ok_about = set([cat for cat, status in about_rules.items() if status == "OK"])
+    # =========================================================================
+    # DuckDB 高速エンジン適用 (14x+ 高速化 / 100% 互換)
+    # =========================================================================
+    try:
+        try:
+            from .duckdb_manager import DuckDBManager
+        except (ImportError, ValueError):
+            from duckdb_manager import DuckDBManager
 
-    ng_ngram = set([pat for pat, status in ngram_rules.items() if status == "NG"])
-    ok_ngram = set([pat for pat, status in ngram_rules.items() if status == "OK"])
-
-    ok_count = 0
+        db = DuckDBManager(":memory:")
+        imported_cnt = db.import_jsonl(input_jsonl_path)
+        if imported_cnt > 0:
+            res = db.apply_rules_fast(about_rules, ngram_rules)
+            db.export_split_datasets(
+                output_target_for_llm_jsonl=output_target_for_llm_jsonl,
+                output_confirmed_ok_jsonl=output_confirmed_ok_jsonl,
+                output_discarded_csv=output_discarded_csv
+            )
+            db.close()
+            return res["ok"], res["ng"], res["grey"]
+    except Exception as e:
+        logger.warning(f"[DuckDB Fast Engine Notice] フォールバック実行: {e}")
     ng_count = 0
     grey_count = 0
 

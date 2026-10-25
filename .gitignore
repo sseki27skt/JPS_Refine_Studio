@@ -64,3 +64,16 @@ data/about_filtered.jsonl
 data/ngram_filtered.jsonl
 data/target_for_llm.jsonl
 data/llm_judgments.jsonl
+
+# Database files
+*.duckdb
+*.duckdb.wal
+data/benchmark_tmp/
+
+# Documentation (Allow development docs)
+docs/*/implementation_plan.md
+docs/*/task.md
+docs/*/walkthrough.md
+!docs/filter_process_optimization/
+!docs/review_portal_optimization/
+

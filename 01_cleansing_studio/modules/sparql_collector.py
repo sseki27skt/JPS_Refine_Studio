@@ -10,7 +10,10 @@ import json
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from .logger import logger, log_stats
+try:
+    from .logger import logger, log_stats
+except (ImportError, ValueError):
+    from logger import logger, log_stats
 import pandas as pd
 from collections import defaultdict
 

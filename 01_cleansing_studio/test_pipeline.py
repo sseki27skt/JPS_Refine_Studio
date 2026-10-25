@@ -210,7 +210,7 @@ def test_symbol_cleaning_and_multithreaded_classifier():
         print(f"[OK] Clean symbol N-Gram extraction verified. Bi-grams: {bi_gram_words}")
 
         # 並列LLM分類テスト (provider='local', max_workers=2)
-        acc, rej, unk = run_llm_semantic_classification(
+        acc, rej, unk, *rest = run_llm_semantic_classification(
             input_jsonl_path=raw_jsonl,
             output_judgments_path=out_judgments,
             domain_definition="古典楽譜資料",
@@ -220,6 +220,86 @@ def test_symbol_cleaning_and_multithreaded_classifier():
         )
         assert os.path.exists(out_judgments)
         print(f"[OK] Multithreaded LLM classifier finished successfully. (acc={acc}, rej={rej}, unk={unk})")
+
+
+def test_duckdb_engine():
+    print("\n=== [Test 8] DuckDB High-Speed Engine Unit Test ===")
+    from duckdb_manager import DuckDBManager
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        raw_jsonl = os.path.join(tmpdir, "raw.jsonl")
+        target_llm = os.path.join(tmpdir, "target_llm.jsonl")
+        confirmed_ok = os.path.join(tmpdir, "confirmed_ok.jsonl")
+        discarded_csv = os.path.join(tmpdir, "discarded.csv")
+
+        sample_items = [
+            {"@id": "item1", "rdfs:label": "雅楽の楽譜", "schema:about": ["雅楽", "760"]},
+            {"@id": "item2", "rdfs:label": "江戸の古地図", "schema:about": ["地図"]},
+            {"@id": "item3", "rdfs:label": "新選楽譜集 第1巻", "schema:about": ["音楽"]},
+            {"@id": "item4", "rdfs:label": "徳川家系譜図", "schema:about": ["歴史"]}
+        ]
+        with open(raw_jsonl, 'w', encoding='utf-8') as f:
+            for item in sample_items:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+        db = DuckDBManager(":memory:")
+        inserted = db.import_jsonl(raw_jsonl)
+        assert inserted == 4, f"Inserted count mismatch: {inserted}"
+        print(f"[OK] DuckDB imported {inserted} records.")
+
+        # About集計
+        kws = db.get_about_keyword_counts()
+        assert len(kws) >= 4, f"Keyword count mismatch: {len(kws)}"
+        print(f"[OK] DuckDB About counts: {kws}")
+
+        # N-gram集計
+        ngrams = db.extract_ngrams(min_n=2, max_n=2)
+        assert 2 in ngrams
+        print(f"[OK] DuckDB N-gram count: {len(ngrams[2])}")
+
+        # ルール適用
+        about_rules = {"地図": "NG", "雅楽": "OK"}
+        ngram_rules = {"系譜": "NG"}
+        res = db.apply_rules_fast(about_rules, ngram_rules)
+        print(f"[OK] DuckDB apply_rules_fast result: {res}")
+        assert res["ok"] == 1, f"Expected 1 OK, got {res['ok']}"
+        assert res["ng"] == 2, f"Expected 2 NG, got {res['ng']}"
+        assert res["grey"] == 1, f"Expected 1 Grey, got {res['grey']}"
+
+        # エクスポート
+        db.export_split_datasets(target_llm, confirmed_ok, discarded_csv)
+        assert os.path.exists(target_llm) and os.path.exists(confirmed_ok) and os.path.exists(discarded_csv)
+        print("[OK] DuckDB exported datasets verified successfully.")
+
+        # --- 査読ポータル機能のテスト ---
+        # 1. 査読メトリクス取得
+        metrics = db.get_review_metrics()
+        assert metrics["total"] == 4
+        assert metrics["pass_cnt"] == 1
+        assert metrics["reject_cnt"] == 3  # NG(2) + GREY(1) はデフォルト除外
+        print(f"[OK] DuckDB review metrics verified: {metrics}")
+
+        # 2. サーバーサイド検索・ページネーション
+        total_q, page_recs = db.query_review_records(filter_type="すべて", page=1, page_size=2)
+        assert total_q == 4
+        assert len(page_recs) == 2
+        print(f"[OK] DuckDB query_review_records pagination verified (total={total_q}, page_len={len(page_recs)})")
+
+        # 3. 手動オーバーライド (item2 を 合格に変更)
+        db.set_human_decision("item2", "合格")
+        metrics_after = db.get_review_metrics()
+        assert metrics_after["pass_cnt"] == 2
+        assert metrics_after["override_cnt"] == 1
+        print(f"[OK] DuckDB manual override verified: override_cnt={metrics_after['override_cnt']}")
+
+        # 4. 最終確定データエクスポート
+        verified_out = os.path.join(tmpdir, "verified.jsonl")
+        exported_v = db.export_human_verified_data(verified_out)
+        assert exported_v == 2, f"Expected 2 verified records, got {exported_v}"
+        assert os.path.exists(verified_out)
+        print(f"[OK] DuckDB human verified export verified: count={exported_v}")
+
+        db.close()
 
 
 if __name__ == "__main__":
@@ -234,6 +314,7 @@ if __name__ == "__main__":
         test_ngram_extraction_and_filter()
         test_review_portal_and_classifier_parser()
         test_symbol_cleaning_and_multithreaded_classifier()
+        test_duckdb_engine()
         print("\n==================================================")
         print(" SUCCESS: All enhanced pipeline & module tests passed!")
         print("==================================================")
