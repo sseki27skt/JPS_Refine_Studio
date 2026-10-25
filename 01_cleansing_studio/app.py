@@ -64,7 +64,9 @@ PATHS = {
     "PATH_DISCARDED_RULES": os.path.join(DATA_DIR, "discarded_rules.csv"),
     "PATH_LLM_JUDGMENTS": os.path.join(DATA_DIR, "llm_judgments.jsonl"),
     "PATH_VERIFIED_JSONL": os.path.join(DATA_DIR, "human_verified_cleaned.jsonl"),
-    "PATH_EXPORT_JSON": os.path.join(VIEWER_DIR, "scores_data.json")
+    "PATH_EXPORT_JSON": os.path.join(VIEWER_DIR, "scores_data.json"),
+    "PATH_DUCKDB": os.path.join(DATA_DIR, "metadata_store.duckdb"),
+    "PATH_JOB_STATUS": os.path.join(DATA_DIR, "fetch_job_status.json")
 }
 
 # サイドバーメニュー構築

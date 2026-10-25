@@ -76,4 +76,5 @@ docs/*/task.md
 docs/*/walkthrough.md
 !docs/filter_process_optimization/
 !docs/review_portal_optimization/
+!docs/sparql_fetch_optimization/
 

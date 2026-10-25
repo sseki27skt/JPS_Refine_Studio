@@ -3,9 +3,11 @@
 JS-Refine Studio - Step 1: LLMクエリ拡張 ＆ Japan Searchメタデータ一括取得ビュー
 """
 import os
+import sys
 import re
 import json
 import time
+import subprocess
 import streamlit as st
 from modules.llm_query_expander import (
     expand_query_with_llm, 
@@ -22,8 +24,13 @@ from modules.sparql_collector import (
     fetch_uris_with_query_func, 
     build_metadata_for_uris,
     check_metadata_completeness,
-    verify_and_repair_metadata
+    verify_and_repair_metadata,
+    get_job_status,
+    update_job_status,
+    request_job_stop,
+    DEFAULT_STATUS_FILE
 )
+from modules.duckdb_manager import DuckDBManager
 
 def _on_rebuild_regex():
     kw_input_text = st.session_state.get("input_kw_manual", "")
@@ -151,6 +158,58 @@ def render_step1_view(paths: dict):
     """Step 1 画面の描画"""
     st.title("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
     st.caption("対象テーマに基づき、LLMを用いて異体字・旧字体・関連用語を拡張し、再現率（Recall）を最大化する検索クエリを生成してJapan Searchよりデータを一括取得します。")
+
+    # --- 0. バックグラウンドジョブ状態監視バナー (忘却・誤操作・二重起動防止) ---
+    status_file = paths.get("PATH_JOB_STATUS", DEFAULT_STATUS_FILE)
+    job_status = get_job_status(status_file)
+    st_val = job_status.get("status", "IDLE")
+    is_running = (st_val == "RUNNING")
+
+    if is_running:
+        total = job_status.get("total_target", 0)
+        proc = job_status.get("processed_count", 0)
+        pct = (proc / max(1, total)) * 100
+        bs = job_status.get("current_batch_size", 10)
+        stage_name = job_status.get("stage", "build_metadata")
+        eta = job_status.get("eta_seconds")
+        eta_str = f"約 {eta // 60}分 {eta % 60}秒" if (eta is not None and eta > 0) else "計算中..."
+
+        st.info(
+            f"⚡ **バックグラウンドでメタデータ取得が進行中です**（ブラウザを閉じても安全に継続されます）  \n"
+            f"・ステージ: `{stage_name}` | 進捗: **{proc:,} / {total:,} 件** ({pct:.1f}%) | "
+            f"単回バッチ: **{bs} 件** | 残り推定時間: **{eta_str}**"
+        )
+        st.progress(min(1.0, proc / max(1, total)))
+        c_act1, c_act2 = st.columns([1, 1])
+        with c_act1:
+            if st.button("🔄 最新の進捗状況を再読み込み", key="btn_refresh_status", use_container_width=True):
+                st.rerun()
+        with c_act2:
+            if st.button("⏹️ 取得処理を安全に一時停止", key="btn_stop_job", type="secondary", use_container_width=True):
+                request_job_stop(status_file)
+                st.warning("安全停止リクエストを送信しました。現在のバッチが完了次第、安全に中断されます。")
+                time.sleep(1)
+                st.rerun()
+        st.markdown("---")
+    elif st_val == "COMPLETED":
+        total = job_status.get("total_target", 0)
+        c_cmp1, c_cmp2 = st.columns([3, 1])
+        with c_cmp1:
+            st.success(f"🎉 **メタデータ取得が完了しています**（全 {total:,} 件の書誌データが `{paths['PATH_RAW_METADATA']}` に安全に格納済みです）")
+        with c_cmp2:
+            if st.button("➡️ Step 2-A へ進む", key="btn_goto_step2", type="primary", use_container_width=True):
+                st.session_state["main_menu_choice"] = "Step 2-A: データ種別 (rdf:type) 分析・除外"
+                st.rerun()
+        st.markdown("---")
+    elif st_val == "STOPPED":
+        proc = job_status.get("processed_count", 0)
+        total = job_status.get("total_target", 0)
+        st.warning(f"⏸️ **取得処理は一時停止されています**（進捗: {proc:,} / {total:,} 件）。セクション3から「未取得分のみ再開」が可能です。")
+        st.markdown("---")
+    elif st_val == "FAILED":
+        err = job_status.get("error_message", "不明なエラー")
+        st.error(f"❌ **前回実行時にエラーが発生しました**: `{err}`")
+        st.markdown("---")
 
     # --- 1. テーマ入力 ---
     theme_input = st.text_input(
@@ -460,7 +519,54 @@ def render_step1_view(paths: dict):
         else:
             limit_val = st.number_input("1パターンあたりの取得上限件数:", min_value=50, max_value=10000, value=200, step=50)
 
-    if st.button("Japan Searchからの関連メタデータ一括取得および構造化実行", type="primary", use_container_width=True):
+    c_opt1, c_opt2, c_opt3 = st.columns(3)
+    with c_opt1:
+        run_bg = st.checkbox("🚀 バックグラウンド実行（推奨）", value=True, help="ブラウザを閉じてもバックグラウンドで安全に取得が継続されます。")
+    with c_opt2:
+        use_adapt = st.checkbox("⚡ 適応型レート制御", value=True, help="Japan Searchの応答速度や負荷を検知し、バッチサイズ（5〜30件）を自動伸縮します。")
+    with c_opt3:
+        use_res = st.checkbox("🔄 中断からの再開（レジューム）", value=True, help="既に取得済みのレコードをスキップし、未取得の差分のみを取得します。")
+
+    # 既存の対象URIリストがある場合の直接再開ボタン
+    target_uris_file = paths['PATH_TARGET_URIS']
+    if os.path.exists(target_uris_file) and not is_running:
+        try:
+            df_existing_uris = pd.read_csv(target_uris_file)
+            cnt_uris = len(df_existing_uris)
+            if cnt_uris > 0:
+                if st.button(f"▶️ 保存済み対象リスト（{cnt_uris:,} 件）から未取得分のみバックグラウンド再開", type="secondary", use_container_width=True):
+                    worker_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run_fetch_worker.py")
+                    worker_cmd = [
+                        sys.executable,
+                        worker_script,
+                        "--target-uris", target_uris_file,
+                        "--output-jsonl", paths['PATH_RAW_METADATA'],
+                        "--status-file", status_file,
+                        "--duckdb-path", paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(paths['PATH_RAW_METADATA']), "metadata_store.duckdb")),
+                        "--batch-size", "10"
+                    ]
+                    if not use_res:
+                        worker_cmd.append("--no-resume")
+                    if not use_adapt:
+                        worker_cmd.append("--no-adaptive")
+
+                    proc = subprocess.Popen(worker_cmd)
+                    update_job_status(
+                        status="RUNNING",
+                        stage="build_metadata",
+                        total_target=cnt_uris,
+                        processed_count=0,
+                        pid=proc.pid,
+                        status_file=status_file
+                    )
+                    st.success(f"🚀 バックグラウンドワーカー (PID: {proc.pid}) を起動しました！ブラウザを閉じても安全に取得が継続されます。")
+                    time.sleep(1)
+                    st.rerun()
+        except Exception:
+            pass
+
+    btn_label = "⚡ バックグラウンドで取得実行中..." if is_running else "Japan Searchからの関連メタデータ一括取得および構造化実行"
+    if st.button(btn_label, type="primary", disabled=is_running, use_container_width=True):
         status_box = st.empty()
         progress_bar = st.progress(0)
         
@@ -522,20 +628,55 @@ def render_step1_view(paths: dict):
         df_target_uris = pd.DataFrame({"uri": unique_uri_list})
         df_target_uris.to_csv(paths['PATH_TARGET_URIS'], index=False, encoding='utf-8')
         st.caption(f"対象URI一覧を `{paths['PATH_TARGET_URIS']}` に保存しました。")
-        
-        def on_build_progress(done_count, total_count):
-            status_box.markdown(f"詳細書誌メタデータ構築中: **{done_count:,} / {total_count:,} 件** 完了 ({done_count/total_count*100:.1f}%)")
-            progress_bar.progress(done_count / total_count)
 
-        with st.spinner(f"詳細書誌メタデータ（全 {len(unique_uri_list):,} 件）の深層グラフ構築処理を実行中..."):
-            count = build_metadata_for_uris(
-                unique_uri_list, 
-                paths['PATH_RAW_METADATA'], 
-                batch_size=10, 
-                progress_callback=on_build_progress,
-                auto_repair=True
+        # Phase 3: 深層メタデータ構築の実行
+        if run_bg:
+            # バックグラウンドワーカー起動
+            worker_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run_fetch_worker.py")
+            worker_cmd = [
+                sys.executable,
+                worker_script,
+                "--target-uris", paths['PATH_TARGET_URIS'],
+                "--output-jsonl", paths['PATH_RAW_METADATA'],
+                "--status-file", status_file,
+                "--duckdb-path", paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(paths['PATH_RAW_METADATA']), "metadata_store.duckdb")),
+                "--batch-size", "10"
+            ]
+            if not use_res:
+                worker_cmd.append("--no-resume")
+            if not use_adapt:
+                worker_cmd.append("--no-adaptive")
+
+            proc = subprocess.Popen(worker_cmd)
+            update_job_status(
+                status="RUNNING",
+                stage="build_metadata",
+                total_target=len(unique_uri_list),
+                processed_count=0,
+                pid=proc.pid,
+                status_file=status_file
             )
-            st.success(f"メタデータ構築完了: 全 {count:,} 件の構造化データを `{paths['PATH_RAW_METADATA']}` に保存しました。")
+            st.success(f"🚀 バックグラウンドワーカー (PID: {proc.pid}) を起動しました！ブラウザを閉じても作業は継続されます。")
+            time.sleep(1)
+            st.rerun()
+        else:
+            # ブラウザ内同期実行 (フォールバック)
+            def on_build_progress(done_count, total_count):
+                status_box.markdown(f"詳細書誌メタデータ構築中: **{done_count:,} / {total_count:,} 件** 完了 ({done_count/total_count*100:.1f}%)")
+                progress_bar.progress(done_count / total_count)
+
+            with st.spinner(f"詳細書誌メタデータ（全 {len(unique_uri_list):,} 件）の深層グラフ構築処理を実行中..."):
+                count = build_metadata_for_uris(
+                    unique_uri_list, 
+                    paths['PATH_RAW_METADATA'], 
+                    batch_size=10, 
+                    progress_callback=on_build_progress,
+                    auto_repair=True,
+                    resume=use_res,
+                    adaptive=use_adapt,
+                    status_file=status_file
+                )
+                st.success(f"メタデータ構築完了: 全 {count:,} 件の構造化データを `{paths['PATH_RAW_METADATA']}` に保存しました。")
 
     # --- 5. メタデータ完全性検証 ＆ 欠損自動修復セクション ---
     st.markdown("---")
@@ -607,7 +748,8 @@ def render_step1_view(paths: dict):
                         target_uris_for_check, 
                         raw_path, 
                         max_repair_rounds=3, 
-                        progress_callback=on_repair_progress
+                        progress_callback=on_repair_progress,
+                        status_file=status_file
                     )
 
                 if final_rep['is_complete']:

@@ -12,7 +12,14 @@ import tempfile
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "modules")))
 
 from llm_query_expander import expand_query_with_llm, generate_sparql_queries
-from sparql_collector import fetch_uris_with_query_func, build_metadata_for_uris
+from sparql_collector import (
+    fetch_uris_with_query_func, 
+    build_metadata_for_uris,
+    get_job_status,
+    update_job_status,
+    request_job_stop,
+    is_process_alive
+)
 from rule_filter import (
     suggest_ng_keywords_with_llm,
     suggest_related_keywords_by_base,
@@ -302,6 +309,123 @@ def test_duckdb_engine():
         db.close()
 
 
+def test_sparql_fetch_and_job_status():
+    print("\n=== [Test 9] SPARQL Fetch Job Status & Resume Integration Test ===")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        status_file = os.path.join(tmpdir, "test_job_status.json")
+        jsonl_path = os.path.join(tmpdir, "test_raw.jsonl")
+
+        # 1. ジョブステータス基本動作テスト
+        init_st = get_job_status(status_file)
+        assert init_st["status"] == "IDLE", f"Expected IDLE, got {init_st['status']}"
+        print(f"[OK] Initial job status: {init_st['status']}")
+
+        my_pid = os.getpid()
+        assert is_process_alive(my_pid) is True
+        assert is_process_alive(9999999) is False
+        print(f"[OK] Process alive check: PID {my_pid} is alive.")
+
+        update_job_status(
+            status="RUNNING",
+            stage="build_metadata",
+            total_target=100,
+            processed_count=25,
+            current_batch_size=10,
+            pid=my_pid,
+            status_file=status_file
+        )
+        st_after = get_job_status(status_file)
+        assert st_after["status"] == "RUNNING"
+        assert st_after["total_target"] == 100
+        assert st_after["processed_count"] == 25
+        print(f"[OK] Updated status: {st_after['status']}, processed: {st_after['processed_count']}/{st_after['total_target']}")
+
+        # 停止リクエストのテスト
+        req_res = request_job_stop(status_file)
+        assert req_res is True
+        st_stop = get_job_status(status_file)
+        assert st_stop["status"] == "STOP_REQUESTED"
+        print(f"[OK] Stop request transition verified: {st_stop['status']}")
+
+        # 2. レジューム（中断・再開）テスト
+        # 事前に2件のレコードを既存ファイルに書き込み
+        initial_items = [
+            {"@id": "http://example.org/item1", "rdfs:label": "古典籍楽譜 1", "status": "success"},
+            {"@id": "http://example.org/item2", "rdfs:label": "古典籍楽譜 2", "status": "success"}
+        ]
+        with open(jsonl_path, 'w', encoding='utf-8') as f:
+            for item in initial_items:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+        # 対象URIリスト（4件: item1, item2, item3, item4）
+        all_targets = [
+            "http://example.org/item1",
+            "http://example.org/item2",
+            "http://example.org/item3",
+            "http://example.org/item4"
+        ]
+
+        # sparql_collector のモックテスト
+        import sparql_collector
+        orig_fetch = sparql_collector.fetch_deep_graph_with_stats
+        
+        fetched_chunks = []
+        def mock_fetch(uris, session=None, timeout_sec=45):
+            fetched_chunks.append(list(uris))
+            bindings = []
+            for u in uris:
+                bindings.append({
+                    's': {'value': u},
+                    'p': {'value': 'http://www.w3.org/2000/01/rdf-schema#label'},
+                    'o': {'value': f"Title of {u}"}
+                })
+            return bindings, {"is_clean": True, "split_count": 0, "elapsed": 0.1, "success": True}
+
+        sparql_collector.fetch_deep_graph_with_stats = mock_fetch
+
+        try:
+            # resume=True で実行
+            count = build_metadata_for_uris(
+                uri_list=all_targets,
+                output_jsonl_path=jsonl_path,
+                batch_size=2,
+                auto_repair=False,
+                resume=True,
+                status_file=status_file
+            )
+
+            # 既存の item1, item2 はスキップされ、未取得の item3, item4 のみが fetch されたか確認
+            flat_fetched = [u for chunk in fetched_chunks for u in chunk]
+            print(f"[OK] Fetched newly requested URIs: {flat_fetched}")
+            assert "http://example.org/item1" not in flat_fetched, "item1 should have been skipped by resume!"
+            assert "http://example.org/item2" not in flat_fetched, "item2 should have been skipped by resume!"
+            assert "http://example.org/item3" in flat_fetched
+            assert "http://example.org/item4" in flat_fetched
+
+            # ファイル内の全件数確認 (4件)
+            with open(jsonl_path, 'r', encoding='utf-8') as f:
+                lines = [json.loads(line) for line in f if line.strip()]
+            assert len(lines) == 4, f"Expected 4 records in file, got {len(lines)}"
+            uids = [rec.get("@id") for rec in lines]
+            assert set(uids) == set(all_targets), f"UID mismatch: {uids}"
+            print(f"[OK] Resume complete: All {len(lines)} records safely retained without duplicate.")
+
+            # 3. 再度同じ全件で resume=True を実行した場合、即座にスキップ完了するか
+            fetched_chunks.clear()
+            count2 = build_metadata_for_uris(
+                uri_list=all_targets,
+                output_jsonl_path=jsonl_path,
+                resume=True,
+                status_file=status_file
+            )
+            assert len(fetched_chunks) == 0, "Should not have made any requests on fully-fetched target!"
+            assert count2 == 4
+            print(f"[OK] Zero-fetch instant skip verified when already completed.")
+
+        finally:
+            sparql_collector.fetch_deep_graph_with_stats = orig_fetch
+
+
 if __name__ == "__main__":
     print("--------------------------------------------------")
     print("  Japan Search Enhanced Pipeline & Module Unit Tests")
@@ -315,6 +439,7 @@ if __name__ == "__main__":
         test_review_portal_and_classifier_parser()
         test_symbol_cleaning_and_multithreaded_classifier()
         test_duckdb_engine()
+        test_sparql_fetch_and_job_status()
         print("\n==================================================")
         print(" SUCCESS: All enhanced pipeline & module tests passed!")
         print("==================================================")
