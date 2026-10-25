@@ -14,6 +14,25 @@ def render_dashboard_view(paths: dict):
     </div>
     """, unsafe_allow_html=True)
 
+    # バックグラウンド実行中ステータスバナー
+    from modules.sparql_collector import get_job_status
+    status_file = paths.get("PATH_JOB_STATUS")
+    st_data = get_job_status(status_file)
+    if st_data.get("status") == "RUNNING":
+        tot = st_data.get("total_target", 0)
+        proc = st_data.get("processed_count", 0)
+        stage_name = st_data.get("stage", "running")
+        pct = (proc / max(1, tot)) * 100 if tot > 0 else 0.0
+        eta = st_data.get("eta_seconds")
+        eta_str = f"約 {eta // 60}分 {eta % 60}秒" if (eta is not None and eta > 0) else "計算中..."
+        st.info(
+            f"⚡ **バックグラウンドでメタデータ取得が進行中です**（ダッシュボード閲覧中も安全に継続されます）  \n"
+            f"・ステージ: `{stage_name}` | 進捗: **{proc:,} / {tot:,} 件** ({pct:.1f}%) | 残り推定時間: **{eta_str}**"
+        )
+        if tot > 0:
+            st.progress(min(1.0, proc / max(1, tot)))
+        st.write("---")
+
     st.subheader("パイプライン全体進捗ダッシュボード")
 
     cols = st.columns(4)
@@ -79,10 +98,28 @@ def render_dashboard_view(paths: dict):
                 import os
                 import time
 
-                # 削除対象ファイルリスト
+                # 中間データ削除対象リスト（ルール定義ファイルは空JSONで安全初期化）
                 data_dir = os.path.dirname(paths.get("PATH_RAW_METADATA", "data"))
-                delete_targets = list(paths.values()) + [
-                    os.path.join(data_dir, "type_filtered.jsonl"),
+                
+                # ルール定義ファイル以外のデータ成果物を削除対象とする
+                data_targets = [
+                    paths.get("PATH_RAW_METADATA"),
+                    paths.get("PATH_TARGET_URIS"),
+                    paths.get("PATH_TYPE_FILTERED"),
+                    paths.get("PATH_ABOUT_FILTERED"),
+                    paths.get("PATH_NGRAM_FILTERED"),
+                    paths.get("PATH_TARGET_FOR_LLM"),
+                    paths.get("PATH_CONFIRMED_OK"),
+                    paths.get("PATH_DISCARDED_RULES"),
+                    paths.get("PATH_LLM_JUDGMENTS"),
+                    paths.get("PATH_VERIFIED_JSONL"),
+                    paths.get("PATH_EXPORT_JSON"),
+                    paths.get("PATH_DUCKDB"),
+                    paths.get("PATH_JOB_STATUS"),
+                    os.path.join(data_dir, "fetch_job_status.json.tmp"),
+                    os.path.join(data_dir, "metadata_store.duckdb.wal"),
+                    os.path.join(data_dir, "current_fetch_params.json"),
+                    os.path.join(data_dir, "cleaned_metadata.csv"),
                     os.path.join(data_dir, "discarded_about.csv"),
                     os.path.join(data_dir, "discarded_ngram.csv"),
                     os.path.join(data_dir, "discarded_suffix_filtered.csv"),
@@ -93,13 +130,27 @@ def render_dashboard_view(paths: dict):
                 ]
 
                 deleted_count = 0
-                for file_path in set(delete_targets):
-                    if os.path.exists(file_path):
+                for file_path in set(data_targets):
+                    if file_path and os.path.exists(file_path):
                         try:
                             os.remove(file_path)
                             deleted_count += 1
                         except Exception as e:
                             st.warning(f"削除スキップ: {file_path} ({e})")
+
+                # ルール定義ファイルは物理削除せず空JSONで安全初期化
+                import json
+                type_r_path = paths.get("PATH_TYPE_RULES")
+                if type_r_path:
+                    os.makedirs(os.path.dirname(type_r_path), exist_ok=True)
+                    with open(type_r_path, "w", encoding="utf-8") as f:
+                        json.dump({"NG": [], "OK": []}, f, ensure_ascii=False, indent=2)
+
+                for r_path in [paths.get("PATH_ABOUT_RULES"), paths.get("PATH_NGRAM_RULES")]:
+                    if r_path:
+                        os.makedirs(os.path.dirname(r_path), exist_ok=True)
+                        with open(r_path, "w", encoding="utf-8") as f:
+                            json.dump({}, f, ensure_ascii=False, indent=2)
 
                 # キャッシュおよびセッション状態のクリア
                 st.cache_data.clear()

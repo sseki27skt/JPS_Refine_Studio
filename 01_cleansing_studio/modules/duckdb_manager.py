@@ -54,9 +54,15 @@ class DuckDBManager:
                 llm_reason VARCHAR DEFAULT NULL,
                 external_info VARCHAR DEFAULT NULL,
                 human_decision VARCHAR DEFAULT NULL,
-                review_reasons VARCHAR DEFAULT NULL
+                review_reasons VARCHAR DEFAULT NULL,
+                llm_evaluated BOOLEAN DEFAULT FALSE
             );
         """)
+        # 既存DBファイルに対するスキーママイグレーション
+        try:
+            self.conn.execute("ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS llm_evaluated BOOLEAN DEFAULT FALSE;")
+        except Exception:
+            pass
         # インデックス作成（存在しない場合）
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_records_decision ON metadata_records(final_decision);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_records_human ON metadata_records(human_decision);")
@@ -262,7 +268,7 @@ class DuckDBManager:
                     matched_ok_reason = f"タイトル OK: 「{m.group(0)}」"
 
             if has_ok:
-                updates.append((item_id, "OK", matched_ok_reason))
+                updates.append((item_id, "OK", f"[ルール合格] {matched_ok_reason}"))
                 ok_count += 1
             else:
                 updates.append((item_id, "GREY", "判定保留 (LLMセマンティック対象)"))
@@ -315,11 +321,14 @@ class DuckDBManager:
         """).fetchall()
         with open(output_confirmed_ok_jsonl, 'w', encoding='utf-8') as f:
             for r in ok_rows:
+                reason_str = r[2] or ""
+                if not reason_str.startswith("[ルール合格]"):
+                    reason_str = f"[ルール合格] {reason_str}"
                 entry = {
                     "id": r[0],
                     "title": r[1],
                     "is_target": True,
-                    "reason": r[2],
+                    "reason": reason_str,
                     "raw_item": json.loads(r[3])
                 }
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -377,6 +386,7 @@ class DuckDBManager:
             SET llm_target = t.llm_target,
                 llm_reason = t.llm_reason,
                 external_info = t.external_info,
+                llm_evaluated = true,
                 final_decision = CASE
                     WHEN t.llm_target = true THEN 'OK'
                     WHEN t.llm_target = false THEN 'NG'
@@ -385,6 +395,7 @@ class DuckDBManager:
                 matched_reason = CASE
                     WHEN t.llm_target = true THEN 'LLM判定適合: ' || coalesce(t.llm_reason, '')
                     WHEN t.llm_target = false THEN 'LLM判定除外: ' || coalesce(t.llm_reason, '')
+                    WHEN t.llm_target IS NULL THEN 'LLM判定不能 (null): ' || coalesce(t.llm_reason, '')
                     ELSE matched_reason
                 END
             FROM temp_llm_sync t
@@ -403,7 +414,7 @@ class DuckDBManager:
                 count(*) FILTER (WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格') AS pass_cnt,
                 count(*) FILTER (WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '除外') AS reject_cnt,
                 count(*) FILTER (WHERE human_decision IS NOT NULL AND human_decision != (CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END)) AS override_cnt,
-                count(*) FILTER (WHERE llm_target IS NULL AND (matched_reason LIKE '%LLM%' OR review_reasons LIKE '%LLM%')) AS null_cnt
+                count(*) FILTER (WHERE llm_evaluated = true AND llm_target IS NULL) AS null_cnt
             FROM metadata_records;
         """
         row = self.conn.execute(query).fetchone()
@@ -433,7 +444,7 @@ class DuckDBManager:
 
         # 絞り込みフィルタ
         if filter_type == "LLM判定不能 (null) データのみ":
-            where_clauses.append("(llm_target IS NULL AND (matched_reason LIKE '%LLM%' OR review_reasons LIKE '%LLM%'))")
+            where_clauses.append("(llm_evaluated = true AND llm_target IS NULL)")
         elif filter_type == "現在『合格』のデータのみ":
             where_clauses.append("coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格'")
         elif filter_type == "現在『除外』のデータのみ":
@@ -518,7 +529,7 @@ class DuckDBManager:
         """
         os.makedirs(os.path.dirname(os.path.abspath(output_verified_jsonl)), exist_ok=True)
         query = """
-            SELECT id, raw_json, matched_reason
+            SELECT id, raw_json, matched_reason, human_decision
             FROM metadata_records
             WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格';
         """
@@ -526,13 +537,55 @@ class DuckDBManager:
 
         with open(output_verified_jsonl, 'w', encoding='utf-8') as f:
             for r in rows:
-                item_id, raw_j, matched_r = r
+                item_id, raw_j, matched_r, h_dec = r
                 item = json.loads(raw_j) if raw_j else {"@id": item_id}
                 item["human_verified_status"] = "APPROVED"
+                item["human_decision"] = h_dec or "合格"
                 item["review_reasons"] = matched_r or "全ルール通過"
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
         return len(rows)
+
+    def sync_human_decisions(self, verified_jsonl_path: str) -> int:
+        """
+        過去の確定査読データ (human_verified_cleaned.jsonl) から手動判定を復元
+        """
+        if not os.path.exists(verified_jsonl_path):
+            return 0
+
+        updates = []
+        with open(verified_jsonl_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    uid = data.get("@id", data.get("id"))
+                    if not uid:
+                        continue
+                    decision = data.get("human_decision", "合格")
+                    updates.append((str(uid), str(decision)))
+                except Exception:
+                    continue
+
+        if not updates:
+            return 0
+
+        self.conn.execute("""
+            CREATE TEMP TABLE temp_human_sync (
+                id VARCHAR PRIMARY KEY,
+                decision VARCHAR
+            );
+        """)
+        self.conn.executemany("INSERT OR REPLACE INTO temp_human_sync VALUES (?, ?);", updates)
+        self.conn.execute("""
+            UPDATE metadata_records
+            SET human_decision = h.decision
+            FROM temp_human_sync h
+            WHERE metadata_records.id = h.id;
+        """)
+        self.conn.execute("DROP TABLE temp_human_sync;")
+        return len(updates)
 
     def close(self):
         """接続終了"""

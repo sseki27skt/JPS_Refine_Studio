@@ -8,6 +8,7 @@ import sys
 import argparse
 import signal
 import time
+import json
 import pandas as pd
 
 # 親ディレクトリを sys.path に追加
@@ -19,21 +20,27 @@ from modules.sparql_collector import (
     build_metadata_for_uris,
     update_job_status,
     get_job_status,
+    is_process_alive,
+    fetch_uris_with_query_func,
     DEFAULT_STATUS_FILE
 )
+from modules.llm_query_expander import generate_sparql_queries
 from modules.duckdb_manager import DuckDBManager
 from modules.logger import logger
+
+ACTIVE_STATUS_FILE = DEFAULT_STATUS_FILE
 
 
 def handle_exit(signum, frame):
     """シグナル受信時にステータスを更新して安全に終了"""
     logger.info(f"[Worker] シグナル {signum} を受信。ジョブを中断ステータスに設定します...")
-    update_job_status(status="STOPPED", error_message="シグナル受信によりプロセスが中断されました。")
+    update_job_status(status="STOPPED", error_message="シグナル受信によりプロセスが中断されました。", status_file=ACTIVE_STATUS_FILE)
     sys.exit(0)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Japan Search メタデータ取得 バックグラウンドワーカー")
+    parser.add_argument("--params-json", type=str, default=None, help="検索条件パラメータJSONパス（指定時はURI収集から全自動実行）")
     parser.add_argument("--target-uris", type=str, default=os.path.join(CURRENT_DIR, "..", "data", "target_uris.csv"), help="対象URIリスト(CSVまたはTXT)")
     parser.add_argument("--output-jsonl", type=str, default=os.path.join(CURRENT_DIR, "..", "data", "raw_metadata.jsonl"), help="出力先JSONLパス")
     parser.add_argument("--status-file", type=str, default=DEFAULT_STATUS_FILE, help="ステータス記録用JSONパス")
@@ -45,13 +52,99 @@ def main():
 
     args = parser.parse_args()
 
+    global ACTIVE_STATUS_FILE
+    ACTIVE_STATUS_FILE = args.status_file
+
     # シグナルハンドラ設定
     signal.signal(signal.SIGINT, handle_exit)
     signal.signal(signal.SIGTERM, handle_exit)
 
     my_pid = os.getpid()
+
+    # 二重起動チェック (排他制御)
+    existing_st = get_job_status(args.status_file)
+    prev_pid = existing_st.get("pid")
+    if existing_st.get("status") == "RUNNING" and prev_pid and prev_pid != my_pid:
+        if is_process_alive(prev_pid):
+            logger.warning(f"[Worker PID={my_pid}] 既に別のワーカー (PID={prev_pid}) が実行中のため、二重起動を防止し終了します。")
+            print(f"[Worker PID={my_pid}] 既に別のワーカー (PID={prev_pid}) が実行中のため、二重起動を防止し終了します。")
+            sys.exit(0)
+
     logger.info(f"[Worker PID={my_pid}] バックグラウンドワーカー起動開始")
     print(f"[Worker PID={my_pid}] バックグラウンドワーカー起動開始")
+
+    # --- Phase 1: params-json が指定されている場合はURI特定から全自動実行 ---
+    if args.params_json and os.path.exists(args.params_json):
+        logger.info(f"[Worker PID={my_pid}] パラメータJSONからURI網羅収集フェーズを開始: {args.params_json}")
+        print(f"[Worker PID={my_pid}] パラメータJSONからURI網羅収集フェーズを開始: {args.params_json}")
+        try:
+            with open(args.params_json, 'r', encoding='utf-8') as f:
+                exp_params = json.load(f)
+            
+            is_unlim = exp_params.get("is_unlimited", True)
+            query_limit = exp_params.get("limit_val", 500)
+
+            queries = generate_sparql_queries(exp_params)
+            total_q_count = len(queries)
+            all_uris_set = set()
+            failed_queries = []
+
+            update_job_status(
+                status="RUNNING",
+                stage="collect_uris",
+                total_target=0,
+                processed_count=0,
+                pid=my_pid,
+                status_file=args.status_file
+            )
+
+            for idx, (name, func) in enumerate(queries):
+                # 中断チェック
+                cur_st = get_job_status(args.status_file)
+                if cur_st.get("status") in ["STOP_REQUESTED", "STOPPED"]:
+                    update_job_status(status="STOPPED", error_message="ユーザー要求により中断", status_file=args.status_file)
+                    sys.exit(0)
+
+                logger.info(f"[{idx+1}/{total_q_count}] パターン実行中: {name} (limit={query_limit}, unlimited={is_unlim})")
+                uris, success = fetch_uris_with_query_func(
+                    func, 
+                    pattern_name=name, 
+                    limit=query_limit, 
+                    unlimited=is_unlim, 
+                    timeout_sec=45
+                )
+                all_uris_set.update(uris)
+                if not success:
+                    failed_queries.append((name, func))
+
+                update_job_status(
+                    stage=f"collect_uris ({idx+1}/{total_q_count} パターン)",
+                    total_target=len(all_uris_set),
+                    status_file=args.status_file
+                )
+
+            # 遅延パターンの再取得
+            if failed_queries:
+                time.sleep(3)
+                for idx, (name, func) in enumerate(failed_queries):
+                    uris, success = fetch_uris_with_query_func(
+                        func, pattern_name=f"{name} (再試行)", limit=query_limit, unlimited=is_unlim, timeout_sec=60
+                    )
+                    all_uris_set.update(uris)
+
+            # CSV 保存
+            unique_uris = sorted(list(all_uris_set))
+            os.makedirs(os.path.dirname(args.target_uris), exist_ok=True)
+            df_uris = pd.DataFrame({"uri": unique_uris})
+            df_uris.to_csv(args.target_uris, index=False, encoding='utf-8')
+            logger.info(f"[Worker PID={my_pid}] 対象URI収集完了: {len(unique_uris):,} 件 ➔ {args.target_uris}")
+            print(f"[Worker PID={my_pid}] 対象URI収集完了: {len(unique_uris):,} 件 ➔ {args.target_uris}")
+
+        except Exception as e:
+            err = f"URI網羅収集フェーズでエラーが発生しました: {e}"
+            logger.error(f"[Worker] {err}")
+            update_job_status(status="FAILED", error_message=err, pid=my_pid, status_file=args.status_file)
+            sys.exit(1)
 
     # 対象URIの読み込み
     target_uris = []

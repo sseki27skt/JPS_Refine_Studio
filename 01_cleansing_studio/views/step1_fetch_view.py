@@ -30,7 +30,6 @@ from modules.sparql_collector import (
     request_job_stop,
     DEFAULT_STATUS_FILE
 )
-from modules.duckdb_manager import DuckDBManager
 
 def _on_rebuild_regex():
     kw_input_text = st.session_state.get("input_kw_manual", "")
@@ -197,9 +196,16 @@ def render_step1_view(paths: dict):
         with c_cmp1:
             st.success(f"🎉 **メタデータ取得が完了しています**（全 {total:,} 件の書誌データが `{paths['PATH_RAW_METADATA']}` に安全に格納済みです）")
         with c_cmp2:
-            if st.button("➡️ Step 2-A へ進む", key="btn_goto_step2", type="primary", use_container_width=True):
+            def _goto_step2():
                 st.session_state["main_menu_choice"] = "Step 2-A: データ種別 (rdf:type) 分析・除外"
-                st.rerun()
+
+            st.button(
+                "➡️ Step 2-A へ進む",
+                key="btn_goto_step2",
+                type="primary",
+                on_click=_goto_step2,
+                use_container_width=True
+            )
         st.markdown("---")
     elif st_val == "STOPPED":
         proc = job_status.get("processed_count", 0)
@@ -567,75 +573,21 @@ def render_step1_view(paths: dict):
 
     btn_label = "⚡ バックグラウンドで取得実行中..." if is_running else "Japan Searchからの関連メタデータ一括取得および構造化実行"
     if st.button(btn_label, type="primary", disabled=is_running, use_container_width=True):
-        status_box = st.empty()
-        progress_bar = st.progress(0)
-        
-        all_collected_uris = set()
-        failed_queries = []
-
-        # Phase 1: 一斉クエリ取得
-        total_steps = len(queries)
-        for idx, (name, func) in enumerate(queries):
-            def on_phase1_progress(p_name, current_pattern_count):
-                status_box.markdown(
-                    f"全 {len(queries)} パターン中 **{idx+1} パターン目**: `[{name}]` を収集中...  \n"
-                    f"・このパターンの取得数: **{current_pattern_count:,} 件**  \n"
-                    f"・現在までの全体累計 (重複除外前概算): **{len(all_collected_uris) + current_pattern_count:,} 件**"
-                )
-
-            on_phase1_progress(name, 0)
-            uris, success = fetch_uris_with_query_func(
-                func, 
-                pattern_name=name, 
-                limit=limit_val, 
-                unlimited=is_unlimited, 
-                progress_callback=on_phase1_progress, 
-                timeout_sec=45
-            )
-            all_collected_uris.update(uris)
-            if not success:
-                failed_queries.append((name, func))
-            progress_bar.progress((idx + 1) / total_steps)
-
-        # Phase 2: 応答遅延パターンの自動再取得フェーズ
-        if failed_queries:
-            status_box.warning(f"初回応答遅延が発生した {len(failed_queries)} 件のクエリパターンに対して、3秒待機後に自動再読み込みを実行します...")
-            time.sleep(3)
-            for idx, (name, func) in enumerate(failed_queries):
-                def on_phase2_progress(p_name, current_pattern_count):
-                    status_box.markdown(
-                        f"自動再取得フェーズ [{idx+1}/{len(failed_queries)}]: `[{name}]` を再読み込み中...  \n"
-                        f"・現在までの全体累計: **{len(all_collected_uris) + current_pattern_count:,} 件**"
-                    )
-
-                on_phase2_progress(name, 0)
-                uris, success = fetch_uris_with_query_func(
-                    func, 
-                    pattern_name=f"{name} (再試行)", 
-                    limit=limit_val, 
-                    unlimited=is_unlimited, 
-                    progress_callback=on_phase2_progress, 
-                    timeout_sec=60
-                )
-                all_collected_uris.update(uris)
-                if success:
-                    st.info(f"再取得成功: `[{name}]` から追加データを正常に取得しました。")
-
-        st.success(f"リソースURIの収集完了: 重複のない **{len(all_collected_uris):,} 件** の対象URIを取得しました。")
-        
-        # 対象URI一覧を CSV に永続化
-        unique_uri_list = sorted(list(all_collected_uris))
-        df_target_uris = pd.DataFrame({"uri": unique_uri_list})
-        df_target_uris.to_csv(paths['PATH_TARGET_URIS'], index=False, encoding='utf-8')
-        st.caption(f"対象URI一覧を `{paths['PATH_TARGET_URIS']}` に保存しました。")
-
-        # Phase 3: 深層メタデータ構築の実行
         if run_bg:
-            # バックグラウンドワーカー起動
+            # 即座に全プロセス（URI収集 ➔ 詳細グラフ構築）をバックグラウンドワーカーに委譲
+            params_file = os.path.join(os.path.dirname(paths['PATH_TARGET_URIS']), "current_fetch_params.json")
+            os.makedirs(os.path.dirname(params_file), exist_ok=True)
+            exp_payload = dict(exp)
+            exp_payload["is_unlimited"] = is_unlimited
+            exp_payload["limit_val"] = limit_val
+            with open(params_file, 'w', encoding='utf-8') as f:
+                json.dump(exp_payload, f, ensure_ascii=False, indent=2)
+
             worker_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run_fetch_worker.py")
             worker_cmd = [
                 sys.executable,
                 worker_script,
+                "--params-json", params_file,
                 "--target-uris", paths['PATH_TARGET_URIS'],
                 "--output-jsonl", paths['PATH_RAW_METADATA'],
                 "--status-file", status_file,
@@ -647,20 +599,65 @@ def render_step1_view(paths: dict):
             if not use_adapt:
                 worker_cmd.append("--no-adaptive")
 
-            proc = subprocess.Popen(worker_cmd)
+            # start_new_session=True により、画面遷移やリロードでも親プロセスの影響を受けず独立実行
+            proc = subprocess.Popen(worker_cmd, start_new_session=True)
             update_job_status(
                 status="RUNNING",
-                stage="build_metadata",
-                total_target=len(unique_uri_list),
+                stage="collect_uris",
+                total_target=0,
                 processed_count=0,
                 pid=proc.pid,
                 status_file=status_file
             )
-            st.success(f"🚀 バックグラウンドワーカー (PID: {proc.pid}) を起動しました！ブラウザを閉じても作業は継続されます。")
+            st.success(f"🚀 バックグラウンドワーカー (PID: {proc.pid}) を起動しました！ダッシュボードに切り替えても、ブラウザを閉じても作業は継続されます。")
             time.sleep(1)
             st.rerun()
         else:
             # ブラウザ内同期実行 (フォールバック)
+            status_box = st.empty()
+            progress_bar = st.progress(0)
+            
+            all_collected_uris = set()
+            failed_queries = []
+
+            # Phase 1: 一斉クエリ取得
+            total_steps = len(queries)
+            for idx, (name, func) in enumerate(queries):
+                def on_phase1_progress(p_name, current_pattern_count):
+                    status_box.markdown(
+                        f"全 {len(queries)} パターン中 **{idx+1} パターン目**: `[{name}]` を収集中...  \n"
+                        f"・このパターンの取得数: **{current_pattern_count:,} 件**  \n"
+                        f"・現在までの全体累計 (重複除外前概算): **{len(all_collected_uris) + current_pattern_count:,} 件**"
+                    )
+
+                on_phase1_progress(name, 0)
+                uris, success = fetch_uris_with_query_func(
+                    func, 
+                    pattern_name=name, 
+                    limit=limit_val, 
+                    unlimited=is_unlimited, 
+                    progress_callback=on_phase1_progress, 
+                    timeout_sec=45
+                )
+                all_collected_uris.update(uris)
+                if not success:
+                    failed_queries.append((name, func))
+                progress_bar.progress((idx + 1) / total_steps)
+
+            # Phase 2: 応答遅延パターンの自動再取得フェーズ
+            if failed_queries:
+                status_box.warning(f"初回応答遅延が発生した {len(failed_queries)} 件のクエリパターンに対して、3秒待機後に自動再読み込みを実行します...")
+                time.sleep(3)
+                for idx, (name, func) in enumerate(failed_queries):
+                    uris, success = fetch_uris_with_query_func(
+                        func, pattern_name=f"{name} (再試行)", limit=limit_val, unlimited=is_unlimited, timeout_sec=60
+                    )
+                    all_collected_uris.update(uris)
+
+            unique_uri_list = sorted(list(all_collected_uris))
+            df_target_uris = pd.DataFrame({"uri": unique_uri_list})
+            df_target_uris.to_csv(paths['PATH_TARGET_URIS'], index=False, encoding='utf-8')
+
             def on_build_progress(done_count, total_count):
                 status_box.markdown(f"詳細書誌メタデータ構築中: **{done_count:,} / {total_count:,} 件** 完了 ({done_count/total_count*100:.1f}%)")
                 progress_bar.progress(done_count / total_count)

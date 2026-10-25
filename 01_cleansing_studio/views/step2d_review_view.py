@@ -17,12 +17,41 @@ except (ImportError, ValueError):
 from modules.review_portal import load_merged_review_data, save_human_verified_data
 
 
-def get_or_create_review_db(paths: dict):
+def _calc_review_sources_signature(paths: dict) -> tuple:
+    """査読に関わるソースファイルの更新日時シグネチャを計算"""
+    files_to_check = [
+        paths.get('PATH_RAW_METADATA'),
+        paths.get('PATH_ABOUT_RULES', '01_cleansing_studio/rules/about_rules.json'),
+        paths.get('PATH_NGRAM_RULES', '01_cleansing_studio/rules/ngram_rules.json'),
+        paths.get('PATH_LLM_JUDGMENTS'),
+        paths.get('PATH_VERIFIED_JSONL')
+    ]
+    sig = []
+    for p in files_to_check:
+        if p and os.path.exists(p):
+            sig.append((p, os.path.getmtime(p), os.path.getsize(p)))
+        else:
+            sig.append((p, 0, 0))
+    return tuple(sig)
+
+
+def get_or_create_review_db(paths: dict, force_reload: bool = False):
     """
-    査読ポータル用 DuckDBManager インスタンスの初期化・取得 (SessionState キャッシュ)
+    査読ポータル用 DuckDBManager インスタンスの初期化・取得 (ファイルの変更検知付き自動再ロード)
     """
-    if "duckdb_review_manager" in st.session_state and st.session_state["duckdb_review_manager"] is not None:
-        return st.session_state["duckdb_review_manager"]
+    current_sig = _calc_review_sources_signature(paths)
+    cached_sig = st.session_state.get("duckdb_review_sig")
+    cached_db = st.session_state.get("duckdb_review_manager")
+
+    if not force_reload and cached_db is not None and cached_sig == current_sig:
+        return cached_db
+
+    if cached_db is not None:
+        try:
+            cached_db.close()
+        except Exception:
+            pass
+        st.session_state["duckdb_review_manager"] = None
 
     if DuckDBManager is None:
         return None
@@ -33,7 +62,7 @@ def get_or_create_review_db(paths: dict):
 
     # インメモリDBの生成とインポート
     db = DuckDBManager(":memory:")
-    with st.spinner("DuckDBにメタデータおよび判定ログをロード中..."):
+    with st.spinner("DuckDBにメタデータおよび最新判定ログをロード中..."):
         db.import_jsonl(raw_metadata_path)
 
         # 既存のルール判定結果があれば反映
@@ -63,7 +92,13 @@ def get_or_create_review_db(paths: dict):
         if llm_judgments_path and os.path.exists(llm_judgments_path):
             db.sync_llm_judgments(llm_judgments_path)
 
+        # 過去の確定査読データ（手動オーバーライド）があれば自動復元
+        verified_jsonl_path = paths.get('PATH_VERIFIED_JSONL')
+        if verified_jsonl_path and os.path.exists(verified_jsonl_path):
+            db.sync_human_decisions(verified_jsonl_path)
+
     st.session_state["duckdb_review_manager"] = db
+    st.session_state["duckdb_review_sig"] = _calc_review_sources_signature(paths)
     return db
 
 
@@ -90,7 +125,7 @@ def render_step2d_view(paths: dict):
         total_records = metrics["total"]
 
         st.markdown("### 査読集約ステータスおよび判定修正状況 (⚡ DuckDB 高速集計)")
-        c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+        c_m1, c_m2, c_m3, c_m4, c_m5 = st.columns([2.5, 2.5, 2.5, 2.5, 2])
         with c_m1:
             st.metric("総査読対象数", f"{total_records:,} 件")
         with c_m2:
@@ -98,7 +133,12 @@ def render_step2d_view(paths: dict):
         with c_m3:
             st.metric("現在の合格確定数", f"{metrics['pass_cnt']:,} 件")
         with c_m4:
-            st.metric("判定修正 (オーバーライド) 数", f"{metrics['override_cnt']:,} 件", delta=f"{metrics['override_cnt']} 件を人間が修正済み" if metrics['override_cnt'] > 0 else None)
+            st.metric("判定修正 (オーバーライド) 数", f"{metrics['override_cnt']:,} 件", delta=f"{metrics['override_cnt']} 件を修正済み" if metrics['override_cnt'] > 0 else None)
+        with c_m5:
+            st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
+            if st.button("🔄 データを再同期", help="Step 2のルールやStep 3のLLM判定結果をDuckDBへ強制再読み込みします", use_container_width=True):
+                db = get_or_create_review_db(paths, force_reload=True)
+                st.rerun()
 
         st.markdown("---")
         c_f1, c_f2, c_f3 = st.columns([2, 2, 2])
@@ -193,12 +233,16 @@ def render_step2d_view(paths: dict):
                     )
                     if new_status != cur_status:
                         db.set_human_decision(rid, new_status)
+                        # 即時オートセーブによりリロードやクラッシュでも手動判定を安全保護
+                        db.export_human_verified_data(verified_jsonl_path)
+                        st.session_state["duckdb_review_sig"] = _calc_review_sources_signature(paths)
                         st.rerun()
 
         st.markdown("---")
         if st.button("最終査読確定データ (`human_verified_cleaned.jsonl`) の保存", type="primary", use_container_width=True):
             count = db.export_human_verified_data(verified_jsonl_path)
-            st.success(f"最終査読完了: 全 {count:,} 件の確定データを `{verified_jsonl_path}` に保存しました。")
+            st.session_state["duckdb_review_sig"] = _calc_review_sources_signature(paths)
+            st.success(f"最終査読完了: 全 {count:,} 件の確定データを `{verified_jsonl_path}` に正常保存しました。")
         return
 
     # =========================================================================

@@ -126,6 +126,8 @@ def update_job_status(
         current["eta_seconds"] = eta_seconds
     if error_message is not None:
         current["error_message"] = error_message
+    elif status in ["RUNNING", "COMPLETED"]:
+        current["error_message"] = None
     if pid is not None:
         current["pid"] = pid
 

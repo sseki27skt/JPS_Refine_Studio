@@ -276,14 +276,18 @@ def test_duckdb_engine():
         # エクスポート
         db.export_split_datasets(target_llm, confirmed_ok, discarded_csv)
         assert os.path.exists(target_llm) and os.path.exists(confirmed_ok) and os.path.exists(discarded_csv)
-        print("[OK] DuckDB exported datasets verified successfully.")
+        with open(confirmed_ok, 'r', encoding='utf-8') as f:
+            first_ok = json.loads(f.readline())
+            assert "[ルール合格]" in first_ok["reason"], f"Prefix [ルール合格] missing in reason: {first_ok['reason']}"
+        print("[OK] DuckDB exported datasets verified successfully (with [ルール合格] prefix).")
 
         # --- 査読ポータル機能のテスト ---
-        # 1. 査読メトリクス取得
+        # 1. 査読メトリクス取得 (LLM未判定時は null_cnt は 0 件であるべき)
         metrics = db.get_review_metrics()
         assert metrics["total"] == 4
         assert metrics["pass_cnt"] == 1
         assert metrics["reject_cnt"] == 3  # NG(2) + GREY(1) はデフォルト除外
+        assert metrics["null_cnt"] == 0, f"Expected 0 null_cnt before LLM sync, got {metrics['null_cnt']}"
         print(f"[OK] DuckDB review metrics verified: {metrics}")
 
         # 2. サーバーサイド検索・ページネーション
@@ -305,6 +309,17 @@ def test_duckdb_engine():
         assert exported_v == 2, f"Expected 2 verified records, got {exported_v}"
         assert os.path.exists(verified_out)
         print(f"[OK] DuckDB human verified export verified: count={exported_v}")
+
+        # 5. 手動判定の自動復元テスト (別DBインスタンスでの sync_human_decisions 検証)
+        db_restored = DuckDBManager(":memory:")
+        db_restored.import_jsonl(raw_jsonl)
+        db_restored.apply_rules_fast(about_rules, ngram_rules)
+        restored_cnt = db_restored.sync_human_decisions(verified_out)
+        assert restored_cnt >= 1, f"Expected at least 1 restored decision, got {restored_cnt}"
+        metrics_restored = db_restored.get_review_metrics()
+        assert metrics_restored["override_cnt"] == 1, f"Expected 1 override_cnt after restore, got {metrics_restored['override_cnt']}"
+        print(f"[OK] DuckDB human verified restore verified: restored_cnt={restored_cnt}")
+        db_restored.close()
 
         db.close()
 
