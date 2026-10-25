@@ -65,10 +65,12 @@ data/ngram_filtered.jsonl
 data/target_for_llm.jsonl
 data/llm_judgments.jsonl
 
-# Database files
+# Database files & Runtime job status
 *.duckdb
 *.duckdb.wal
 data/benchmark_tmp/
+data/fetch_job_status.json
+data/fetch_job_status.json.tmp
 
 # Documentation (Allow development docs)
 docs/*/implementation_plan.md
