@@ -51,9 +51,6 @@ JPS-Refine Studio/
 │   ├── cleaned_metadata.csv    # 最新クレンジング済みCSV成果物
 │   └── target_uris.csv         # 抽出対象URI一覧
 │
-├── docs/                       # 研究成果・論文ドラフト
-│   └── jinmoncom_2026_paper/   # 人文科学とコンピュータシンポジウム論文草稿
-│
 ├── requirements.txt            # Python依存ライブラリ一覧
 ├── .gitignore                  # Git除外設定
 └── README.md                   # 本ドキュメント
@@ -92,7 +89,3 @@ python3 -m http.server 8000
 ```
 ブラウザで `http://localhost:8000` を開くことで、楽譜データの検索・閲覧が可能です。
 
----
-
-## 📄 論文・研究関連
-本プロジェクトに関する研究発表・論文草稿は `docs/jinmoncom_2026_paper/paper_draft.md` をご参照ください。
