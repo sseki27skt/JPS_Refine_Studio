@@ -20,6 +20,123 @@ except Exception:
     hotkeys = None
 
 
+@st.cache_data(show_spinner=False)
+def load_filtered_titles(file_path, file_mtime):
+    titles_data = []
+    if os.path.exists(file_path):
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                if not line.strip(): continue
+                try:
+                    item = json.loads(line)
+                    label_val = item.get("rdfs:label", item.get("schema:name", ""))
+                    title_str = str(label_val[0]) if isinstance(label_val, list) and label_val else str(label_val)
+                    titles_data.append(title_str)
+                except Exception:
+                    continue
+    return titles_data
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_ngrams_from_titles_fast(file_path, file_mtime, min_n=2, max_n=9):
+    titles = load_filtered_titles(file_path, file_mtime)
+    counts = {n: Counter() for n in range(min_n, max_n + 1)}
+    samples = {n: defaultdict(list) for n in range(min_n, max_n + 1)}
+
+    # 大規模データ時のサンプリング (最大5万件で上位ランキングを高速推定)
+    scan_titles = titles if len(titles) <= 50000 else titles[:50000]
+
+    for title in scan_titles:
+        clean_title = clean_title_text(title)
+        for n in range(min_n, max_n + 1):
+            if len(clean_title) >= n:
+                ngrams = [clean_title[i:i+n] for i in range(len(clean_title) - n + 1)]
+                for word in set(ngrams):
+                    counts[n][word] += 1
+                    if len(samples[n][word]) < 30 and title not in samples[n][word]:
+                        samples[n][word].append(title)
+
+    result_dict = {}
+    for n in range(min_n, max_n + 1):
+        ranking = []
+        for word, count in counts[n].most_common(500):
+            if count >= 2:
+                ranking.append((word, count, samples[n][word]))
+        result_dict[n] = ranking
+    return result_dict
+
+
+@st.cache_data(show_spinner=False)
+def count_ngram_discarded_records(file_path, file_mtime, ng_rules_tuple):
+    if not ng_rules_tuple:
+        return 0
+    titles = load_filtered_titles(file_path, file_mtime)
+    disc_cnt = 0
+    for title in titles:
+        if any(pattern in title for pattern in ng_rules_tuple):
+            disc_cnt += 1
+    return disc_cnt
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple=None):
+    titles = load_filtered_titles(file_path, file_mtime)
+    res = []
+    for t in titles:
+        if not t:
+            continue
+        if ng_rules_tuple and any(ng in t for ng in ng_rules_tuple):
+            continue
+        if ok_rules_tuple and any(ok in t for ok in ok_rules_tuple):
+            continue
+        res.append(t)
+    return res
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_active_ngram_counts(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple, n_val):
+    titles = get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple)
+    counts = Counter()
+    samples = defaultdict(list)
+    scan_t = titles if len(titles) <= 50000 else titles[:50000]
+    for title in scan_t:
+        clean_t = clean_title_text(title)
+        if len(clean_t) >= n_val:
+            ngrams = set(clean_t[i:i+n_val] for i in range(len(clean_t) - n_val + 1))
+            for word in ngrams:
+                counts[word] += 1
+                if len(samples[word]) < 10 and title not in samples[word]:
+                    samples[word].append(title)
+    return dict(counts), dict(samples)
+
+
+def get_parent_rule(word: str, ng_set: set, ok_set: set) -> tuple:
+    for ng in sorted(list(ng_set), key=len):
+        if len(ng) < len(word) and ng in word:
+            return "NG", ng
+    for ok in sorted(list(ok_set), key=len):
+        if len(ok) < len(word) and ok in word:
+            return "OK", ok
+    return None, None
+
+
+def build_expanded_ngram_rules(ng_set, ok_set, all_ngram_dict):
+    expanded = {}
+    for ng_w in ng_set:
+        expanded[ng_w] = "NG"
+    for ok_w in ok_set:
+        expanded[ok_w] = "OK"
+
+    for n, ranking in all_ngram_dict.items():
+        for word, count, _ in ranking:
+            if word in expanded:
+                continue
+            p_type, p_word = get_parent_rule(word, ng_set, ok_set)
+            if p_type:
+                expanded[word] = p_type
+    return expanded
+
+
 def render_step2b_view(paths: dict):
     """Step 2-C 画面の描画"""
     st.title("Step 2-C: タイトル語彙・文字列パターン（N-Gram / 任意キーワード）分析・除外")
@@ -88,87 +205,16 @@ def render_step2b_view(paths: dict):
     ngram_ng = st.session_state["edited_ngram_ng"]
     ngram_ok = st.session_state["edited_ngram_ok"]
 
-    @st.cache_data(show_spinner=False)
-    def load_filtered_titles(file_path, file_mtime):
-        titles_data = []
-        if os.path.exists(file_path):
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for line in f:
-                    if not line.strip(): continue
-                    try:
-                        item = json.loads(line)
-                        label_val = item.get("rdfs:label", item.get("schema:name", ""))
-                        title_str = str(label_val[0]) if isinstance(label_val, list) and label_val else str(label_val)
-                        titles_data.append(title_str)
-                    except Exception:
-                        continue
-        return titles_data
-
     min_n = 2
     max_n = 9
 
     input_mtime = os.path.getmtime(input_path) if os.path.exists(input_path) else 0
     input_titles = load_filtered_titles(input_path, input_mtime)
-
-    @st.cache_data(show_spinner=False)
-    def get_cached_ngrams_from_titles_fast(file_path, file_mtime, min_n=min_n, max_n=max_n):
-        titles = load_filtered_titles(file_path, file_mtime)
-        counts = {n: Counter() for n in range(min_n, max_n + 1)}
-        samples = {n: defaultdict(list) for n in range(min_n, max_n + 1)}
-
-        # 大規模データ時のサンプリング (最大5万件で上位ランキングを高速推定)
-        scan_titles = titles if len(titles) <= 50000 else titles[:50000]
-
-        for title in scan_titles:
-            clean_title = clean_title_text(title)
-            for n in range(min_n, max_n + 1):
-                if len(clean_title) >= n:
-                    ngrams = [clean_title[i:i+n] for i in range(len(clean_title) - n + 1)]
-                    for word in set(ngrams):
-                        counts[n][word] += 1
-                        if len(samples[n][word]) < 30 and title not in samples[n][word]:
-                            samples[n][word].append(title)
-
-        result_dict = {}
-        for n in range(min_n, max_n + 1):
-            ranking = []
-            for word, count in counts[n].most_common(500):
-                if count >= 2:
-                    ranking.append((word, count, samples[n][word]))
-            result_dict[n] = ranking
-        return result_dict
-
-    ngram_dict = get_cached_ngrams_from_titles_fast(input_path, input_mtime)
+    ngram_dict = get_cached_ngrams_from_titles_fast(input_path, input_mtime, min_n, max_n)
     total_input_records = len(input_titles)
-
-    @st.cache_data(show_spinner=False)
-    def count_ngram_discarded_records(file_path, file_mtime, ng_rules_tuple):
-        if not ng_rules_tuple:
-            return 0
-        titles = load_filtered_titles(file_path, file_mtime)
-        disc_cnt = 0
-        for title in titles:
-            if any(pattern in title for pattern in ng_rules_tuple):
-                disc_cnt += 1
-        return disc_cnt
-
     ngram_discarded_records = count_ngram_discarded_records(input_path, input_mtime, tuple(sorted(list(ngram_ng))))
     ngram_remaining_records = total_input_records - ngram_discarded_records
     ngram_reduction_rate = (ngram_discarded_records / max(1, total_input_records))
-
-    @st.cache_data(show_spinner=False)
-    def get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple=None):
-        titles = load_filtered_titles(file_path, file_mtime)
-        res = []
-        for t in titles:
-            if not t:
-                continue
-            if ng_rules_tuple and any(ng in t for ng in ng_rules_tuple):
-                continue
-            if ok_rules_tuple and any(ok in t for ok in ok_rules_tuple):
-                continue
-            res.append(t)
-        return res
 
     active_titles = get_cached_active_titles(
         input_path, 
@@ -176,31 +222,6 @@ def render_step2b_view(paths: dict):
         tuple(sorted(list(ngram_ng))),
         tuple(sorted(list(ngram_ok)))
     )
-
-    def get_parent_rule(word: str, ng_set: set, ok_set: set) -> tuple:
-        for ng in sorted(list(ng_set), key=len):
-            if len(ng) < len(word) and ng in word:
-                return "NG", ng
-        for ok in sorted(list(ok_set), key=len):
-            if len(ok) < len(word) and ok in word:
-                return "OK", ok
-        return None, None
-
-    def build_expanded_ngram_rules(ng_set, ok_set, all_ngram_dict):
-        expanded = {}
-        for ng_w in ng_set:
-            expanded[ng_w] = "NG"
-        for ok_w in ok_set:
-            expanded[ok_w] = "OK"
-
-        for n, ranking in all_ngram_dict.items():
-            for word, count, _ in ranking:
-                if word in expanded:
-                    continue
-                p_type, p_word = get_parent_rule(word, ng_set, ok_set)
-                if p_type:
-                    expanded[word] = p_type
-        return expanded
 
     # 3カラム / 2ペイン レイアウト（左: メイン作業領域 70% ｜ 右: 固定コントロール＆進捗パネル 30%）
     col_main, col_ctrl = st.columns([7, 3])
@@ -259,7 +280,6 @@ def render_step2b_view(paths: dict):
                 save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                 safe_save_json(save_dict, ngram_rules_path)
                 st.session_state["ngram_view_ver"] += 1
-                st.cache_data.clear()
                 st.success("判別結果をルールへ確定適用・保存しました。")
                 st.rerun()
         else:
@@ -279,7 +299,6 @@ def render_step2b_view(paths: dict):
             safe_save_json(save_dict, ngram_rules_path)
 
             passed, disc = run_ngram_filter(input_path, ngram_rules_path, ngram_filtered_path, f"{data_dir}/discarded_ngram.csv")
-            st.cache_data.clear()
             st.success(f"N-Gram フィルタリング完了: 通過 {passed:,} 件 / 除外 {disc:,} 件 (除外ログ: {data_dir}/discarded_ngram.csv)")
 
         st.write("---")
@@ -382,7 +401,6 @@ def render_step2b_view(paths: dict):
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                             safe_save_json(save_dict, ngram_rules_path)
                             st.session_state["ngram_view_ver"] += 1
-                            st.cache_data.clear()
                             st.success(f"『{kw_q}』を NG ルールへ登録しました (ヒット {tot_hit:,} 件が除外対象になります)。")
                             st.rerun()
                     else:
@@ -391,7 +409,6 @@ def render_step2b_view(paths: dict):
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                             safe_save_json(save_dict, ngram_rules_path)
                             st.session_state["ngram_view_ver"] += 1
-                            st.cache_data.clear()
                             st.success(f"『{kw_q}』の NG 登録を解除しました。")
                             st.rerun()
 
@@ -403,7 +420,6 @@ def render_step2b_view(paths: dict):
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                             safe_save_json(save_dict, ngram_rules_path)
                             st.session_state["ngram_view_ver"] += 1
-                            st.cache_data.clear()
                             st.success(f"『{kw_q}』を OK ルールへ登録しました。")
                             st.rerun()
                     else:
@@ -412,7 +428,6 @@ def render_step2b_view(paths: dict):
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                             safe_save_json(save_dict, ngram_rules_path)
                             st.session_state["ngram_view_ver"] += 1
-                            st.cache_data.clear()
                             st.success(f"『{kw_q}』の OK 登録を解除しました。")
                             st.rerun()
 
@@ -492,7 +507,6 @@ def render_step2b_view(paths: dict):
                         save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                         safe_save_json(save_dict, ngram_rules_path)
                         st.session_state["ngram_view_ver"] += 1
-                        st.cache_data.clear()
                         st.success(f"{len(parsed_custom_kws)} 件のキーワードを NG ルールへ登録しました。")
                         st.rerun()
 
@@ -504,7 +518,6 @@ def render_step2b_view(paths: dict):
                         save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                         safe_save_json(save_dict, ngram_rules_path)
                         st.session_state["ngram_view_ver"] += 1
-                        st.cache_data.clear()
                         st.success(f"{len(parsed_custom_kws)} 件のキーワードを OK ルールへ登録しました。")
                         st.rerun()
 
@@ -541,7 +554,6 @@ def render_step2b_view(paths: dict):
                                     save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                                     safe_save_json(save_dict, ngram_rules_path)
                                     st.session_state["ngram_view_ver"] += 1
-                                    st.cache_data.clear()
                                     st.rerun()
                             else:
                                 if st.button(f"↩️ 『{kw}』をNG解除", key=f"btn_cust_del_{kw}", use_container_width=True):
@@ -549,7 +561,6 @@ def render_step2b_view(paths: dict):
                                     save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                                     safe_save_json(save_dict, ngram_rules_path)
                                     st.session_state["ngram_view_ver"] += 1
-                                    st.cache_data.clear()
                                     st.rerun()
 
                         st.caption(f"該当するタイトルの具体例 (先頭 {len(stat['samples'])} 件):")
@@ -587,11 +598,21 @@ def render_step2b_view(paths: dict):
                     key=f"v_mode_n_{n_val}"
                 )
                 is_unclassified_n_mode = (v_mode_n == "未判定のみ")
-                hide_zero_ngram = st.checkbox(
-                    "残存未判定件数が 0 件のパターンを非表示にする", 
-                    value=True, 
-                    key=f"chk_hide_zero_ngram_{n_val}"
-                )
+                c_sub1, c_sub2 = st.columns([3, 2])
+                with c_sub1:
+                    sort_mode_n = st.radio(
+                        "並び順:",
+                        options=["⚡ 未判定影響度順", "📊 全体出現頻度順"],
+                        horizontal=True,
+                        key=f"sort_mode_n_{n_val}",
+                        help="未判定影響度順: 現在の未除外データの中で多くヒットする（フィルタリング影響の大きい）順に並べます。"
+                    )
+                with c_sub2:
+                    hide_zero_ngram = st.checkbox(
+                        "残存未判定 0 件を非表示", 
+                        value=True, 
+                        key=f"chk_hide_zero_ngram_{n_val}"
+                    )
             with col_o2:
                 c_mode_n = st.radio(
                     f"クリック時アクション (N={n_val}):", 
@@ -615,14 +636,21 @@ def render_step2b_view(paths: dict):
                     continue
                 filtered_items.append((w, c, s))
 
+            active_counts, active_samples = get_cached_active_ngram_counts(
+                input_path, 
+                input_mtime, 
+                tuple(sorted(list(ngram_ng))),
+                tuple(sorted(list(ngram_ok))),
+                n_val
+            )
+
             active_n_samples_map = {}
             for w, c, s in filtered_items:
-                # active_titles（未除外の現存タイトル群）から w を含むタイトル件数およびサンプルを正確に抽出
-                valid_s = [t for t in active_titles if w in t]
-                eff_c = len(valid_s)
+                eff_c = active_counts.get(w, 0)
+                act_s = active_samples.get(w, [])
                 active_n_samples_map[w] = {
                     "eff_cnt": eff_c,
-                    "samples": valid_s[:10] if valid_s else (s[:10] if isinstance(s, list) else [])
+                    "samples": act_s if act_s else (s[:10] if isinstance(s, list) else [])
                 }
 
             if hide_zero_ngram:
@@ -630,6 +658,15 @@ def render_step2b_view(paths: dict):
                     (w, c, s) for w, c, s in filtered_items 
                     if active_n_samples_map.get(w, {}).get("eff_cnt", 0) > 0 or w in ngram_ng or w in ngram_ok
                 ]
+
+            if sort_mode_n == "⚡ 未判定影響度順":
+                filtered_items.sort(
+                    key=lambda item: (
+                        active_n_samples_map.get(item[0], {}).get("eff_cnt", 0),
+                        item[1]
+                    ),
+                    reverse=True
+                )
 
             if f"draft_n_{n_val}_changes" not in st.session_state:
                 st.session_state[f"draft_n_{n_val}_changes"] = {}
@@ -665,7 +702,6 @@ def render_step2b_view(paths: dict):
                         if selected_n_ng_pills:
                             ngram_ng.difference_update(selected_n_ng_pills)
                             st.session_state["ngram_view_ver"] += 1
-                            st.cache_data.clear()
                             st.success(f"{len(selected_n_ng_pills)} 件のパターンを NG ルールから削除しました。")
                             st.rerun()
                         else:
@@ -686,7 +722,6 @@ def render_step2b_view(paths: dict):
                         if selected_n_ok_pills:
                             ngram_ok.difference_update(selected_n_ok_pills)
                             st.session_state["ngram_view_ver"] += 1
-                            st.cache_data.clear()
                             st.success(f"{len(selected_n_ok_pills)} 件のパターンを OK ルールから削除しました。")
                             st.rerun()
                         else:

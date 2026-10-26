@@ -876,11 +876,21 @@ def render_step2a_view(paths: dict):
                 key="view_filter_about_mode"
             )
             is_unclassified_mode = (view_filter_mode == "未判定のみ")
-            hide_zero_about = st.checkbox(
-                "残存未判定件数が 0 件のキーワードを非表示にする", 
-                value=True, 
-                key="chk_hide_zero_about"
-            )
+            c_ab_s1, c_ab_s2 = st.columns([3, 2])
+            with c_ab_s1:
+                sort_about_mode = st.radio(
+                    "並び順:",
+                    options=["⚡ 未判定影響度順", "📊 全体出現頻度順"],
+                    horizontal=True,
+                    key="sort_about_mode",
+                    help="未判定影響度順: 現在の未除外データの中で多くヒットする（フィルタリング影響の大きい）順に並べます。"
+                )
+            with c_ab_s2:
+                hide_zero_about = st.checkbox(
+                    "残存未判定 0 件を非表示", 
+                    value=True, 
+                    key="chk_hide_zero_about"
+                )
         with col_opt2:
             search_query = st.text_input("キーワード検索:", placeholder="例: 演劇 -能", key="q_about_pills")
 
@@ -961,6 +971,12 @@ def render_step2a_view(paths: dict):
                 (kw, cnt) for kw, cnt in filtered_ranking 
                 if kw_eff_counts.get(kw, 0) > 0 or kw in current_ng or kw in current_ok
             ]
+
+        if sort_about_mode == "⚡ 未判定影響度順":
+            filtered_ranking.sort(
+                key=lambda item: (kw_eff_counts.get(item[0], 0), item[1]),
+                reverse=True
+            )
 
         class LazySamplesMap(dict):
             def __init__(self, kw_to_doc_indices, active_doc_indices, raw_records, kw_eff_counts):

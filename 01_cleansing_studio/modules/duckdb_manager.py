@@ -756,6 +756,140 @@ class DuckDBManager:
         total = len(records)
         return {"total": total, "passed": total - disc_cnt, "discarded": disc_cnt}
 
+    def get_type_stats(self) -> List[Dict[str, Any]]:
+        """
+        DuckDBから全rdf:type（リソース種別）の出現頻度ランキングを瞬時に集計
+        """
+        import urllib.parse
+
+        # 1. 未定義 / 種別なしレコード数
+        empty_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE type_list IS NULL OR len(type_list) = 0;
+        """).fetchone()
+        empty_cnt = empty_row[0] if empty_row else 0
+
+        # 2. 全種別の集計
+        rows = self.conn.execute("""
+            SELECT
+                t AS full_uri,
+                COUNT(*) as cnt
+            FROM (
+                SELECT unnest(type_list) AS t
+                FROM metadata_records
+                WHERE type_list IS NOT NULL AND len(type_list) > 0
+            )
+            GROUP BY t
+            ORDER BY cnt DESC;
+        """).fetchall()
+
+        type_map = {}
+        for full_uri, cnt in rows:
+            if not full_uri:
+                continue
+            if full_uri.startswith("http"):
+                short_lbl = urllib.parse.unquote(full_uri.split("/")[-1].split("#")[-1])
+                if not short_lbl:
+                    short_lbl = full_uri
+            else:
+                short_lbl = full_uri
+
+            if short_lbl not in type_map:
+                type_map[short_lbl] = {
+                    "short_label": short_lbl,
+                    "full_uri": full_uri,
+                    "count": cnt,
+                    "samples": []
+                }
+            else:
+                type_map[short_lbl]["count"] += cnt
+
+        stats = []
+        if empty_cnt > 0:
+            stats.append({
+                "short_label": "（未定義 / 種別なし）",
+                "full_uri": "",
+                "count": empty_cnt,
+                "samples": []
+            })
+
+        stats.extend(sorted(type_map.values(), key=lambda x: x["count"], reverse=True))
+        return stats
+
+    def get_records_by_type(self, target_type: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        指定された種別に属するレコード（資料）をオンデマンドで高速取得
+        """
+        if not target_type:
+            return []
+
+        if target_type == "（未定義 / 種別なし）":
+            query = "SELECT id, title, description, type_list FROM metadata_records WHERE type_list IS NULL OR len(type_list) = 0"
+            if limit and limit > 0:
+                query += f" LIMIT {int(limit)}"
+            rows = self.conn.execute(query).fetchall()
+            return [{"id": r[0], "title": r[1] or "（無題）", "description": r[2] or "", "type_list": []} for r in rows]
+
+        # 通常種別
+        rows = self.conn.execute("SELECT id, title, description, type_list FROM metadata_records WHERE type_list IS NOT NULL AND len(type_list) > 0;").fetchall()
+        matched = []
+        for uid, title, desc, t_list in rows:
+            is_hit = False
+            for t in t_list:
+                short_t = t.split("/")[-1].split("#")[-1]
+                if t == target_type or short_t == target_type:
+                    is_hit = True
+                    break
+            if is_hit:
+                matched.append({
+                    "id": uid,
+                    "title": title or "（無題）",
+                    "description": desc or "",
+                    "type_list": t_list
+                })
+                if limit and len(matched) >= limit:
+                    break
+        return matched
+
+    def get_records_discarded_by_types(self, ng_types: List[str], limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        除外対象種別（ng_types）によって影響を受けるすべてのレコード（除外される資料）を高速取得
+        """
+        if not ng_types:
+            return []
+
+        ng_set = set(ng_types)
+        rows = self.conn.execute("SELECT id, title, description, type_list FROM metadata_records;").fetchall()
+        matched = []
+
+        for uid, title, desc, t_list in rows:
+            hit_type = None
+            if not t_list:
+                if "（未定義 / 種別なし）" in ng_set:
+                    hit_type = "（未定義 / 種別なし）"
+            else:
+                for t in t_list:
+                    short_t = t.split("/")[-1].split("#")[-1]
+                    if t in ng_set:
+                        hit_type = t
+                        break
+                    elif short_t in ng_set:
+                        hit_type = short_t
+                        break
+
+            if hit_type:
+                matched.append({
+                    "id": uid,
+                    "title": title or "（無題）",
+                    "description": desc or "",
+                    "matched_type": hit_type,
+                    "type_list": t_list or []
+                })
+                if limit and len(matched) >= limit:
+                    break
+
+        return matched
+
     def export_complete_audit_trail_csv(self, output_csv_path: str) -> int:
         """
         初期母集団全件の完全来歴追跡データ (Complete Audit Trail) をCSVエクスポート

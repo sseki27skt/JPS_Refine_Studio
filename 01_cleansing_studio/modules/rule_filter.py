@@ -689,14 +689,16 @@ def extract_types_from_jsonl(input_jsonl_path: str) -> list:
                 type_to_uri["（未定義 / 種別なし）"] = ""
                 if "（未定義 / 種別なし）" not in type_samples:
                     type_samples["（未定義 / 種別なし）"] = []
-                type_samples["（未定義 / 種別なし）"].append(doc_info)
+                if len(type_samples["（未定義 / 種別なし）"]) < 50:
+                    type_samples["（未定義 / 種別なし）"].append(doc_info)
             else:
                 for full_uri, short_lbl in extracted:
                     type_counts[short_lbl] += 1
                     type_to_uri[short_lbl] = full_uri
                     if short_lbl not in type_samples:
                         type_samples[short_lbl] = []
-                    type_samples[short_lbl].append(doc_info)
+                    if len(type_samples[short_lbl]) < 50:
+                        type_samples[short_lbl].append(doc_info)
 
     result = []
     for short_lbl, cnt in type_counts.most_common():

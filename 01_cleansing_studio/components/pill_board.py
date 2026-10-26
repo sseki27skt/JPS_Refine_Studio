@@ -25,6 +25,20 @@ def render_pill_board(
         st.info("条件に一致する判定対象キーワードはありません。")
         return
 
+    # ツールチップ残存バグ防止 CSS
+    st.markdown(
+        """
+        <style>
+        /* BaseWeb Tooltip 残存防止: マウスイベントを透過させてゴースト化を防止 */
+        div[data-baseweb="tooltip"], div[role="tooltip"] {
+            pointer-events: none !important;
+            transition: opacity 0.1s ease-out !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
     limit_key = f"limit_{page_session_key}"
     if limit_key not in st.session_state:
         st.session_state[limit_key] = items_per_page
@@ -72,17 +86,20 @@ def render_pill_board(
 
             cnt_str = f"({cnt}件)" if eff_c == cnt else f"(未判定 {eff_c}件 / 全{cnt}件)"
 
-            # ツールチップ用テキスト
+            # ツールチップ用テキスト (長大化による残存バグを防ぐため最大2件のコンパクトプレビューに抑制)
             sample_titles = []
-            for s in display_samples[:10]:
+            for s in display_samples[:2]:
                 if isinstance(s, dict):
                     sample_titles.append(s.get("title", ""))
                 else:
                     sample_titles.append(str(s))
 
-            sample_lines = [f"• {t}" for t in sample_titles if t]
-            sample_header = f"【『{disp_w}』の未判定資料例 ({len(sample_lines)}件表示)】:\n" if sample_lines else f"【『{disp_w}』の件数: {cnt_str}】\n"
-            tooltip_txt = sample_header + "\n".join(sample_lines)
+            sample_lines = [f"• {t[:40]}..." if len(t) > 40 else f"• {t}" for t in sample_titles if t]
+            sample_header = f"【『{disp_w}』 {cnt_str}】\n"
+            if sample_lines:
+                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※詳細・全件一覧は右の🔍から確認できます"
+            else:
+                tooltip_txt = sample_header + f"クリック時アクション: 【{click_action_mode}】"
 
             # ドラフト ＆ 既存ルールのステータス判定
             draft_status = draft_dict.get(w)
@@ -111,19 +128,26 @@ def render_pill_board(
             else:
                 btn_label = f"❓ {disp_w} {cnt_str}{d_tag}"
 
+            def _handle_pill_click(word=w, mode_str=str(click_action_mode)):
+                if "NG" in mode_str:
+                    draft_dict[word] = "NG"
+                elif "OK" in mode_str:
+                    draft_dict[word] = "OK"
+                elif "未判定" in mode_str or "RESET" in mode_str or "リセット" in mode_str:
+                    draft_dict[word] = "RESET"
+                else:
+                    draft_dict[word] = "NG"
+
             c_btn, c_pop = col.columns([6, 1])
             with c_btn:
-                if st.button(btn_label, key=f"btn_pills_{page_session_key}_{w}_{idx}", help=tooltip_txt, use_container_width=True):
-                    mode_str = str(click_action_mode)
-                    if "NG" in mode_str:
-                        draft_dict[w] = "NG"
-                    elif "OK" in mode_str:
-                        draft_dict[w] = "OK"
-                    elif "未判定" in mode_str or "RESET" in mode_str or "リセット" in mode_str:
-                        draft_dict[w] = "RESET"
-                    else:
-                        draft_dict[w] = "NG"
-                    st.rerun(scope="fragment")
+                st.button(
+                    btn_label, 
+                    key=f"btn_pills_{page_session_key}_{w}_{idx}", 
+                    help=tooltip_txt, 
+                    use_container_width=True,
+                    on_click=_handle_pill_click,
+                    args=(w, str(click_action_mode))
+                )
 
             with c_pop:
                 with st.popover("🔍", help=f"『{w}』の外部検索・該当資料詳細"):
@@ -133,29 +157,46 @@ def render_pill_board(
                     if parent_type:
                         st.info(f"親ルール継承: **{parent_type}** (親パターン: 『{parent_word}』)")
 
-                    # ポップオーバー内ダイレクト判定
+                    # ポップオーバー内ダイレクト判定 (on_click で即時反映)
+                    def _set_pop_status(word=w, status="NG"):
+                        draft_dict[word] = status
+
                     c_act_ng, c_act_ok, c_act_rst = st.columns(3)
                     with c_act_ng:
-                        if st.button("🚫 NGに設定", key=f"pop_ng_{page_session_key}_{w}_{idx}", use_container_width=True, type="primary" if is_ng else "secondary"):
-                            draft_dict[w] = "NG"
-                            st.rerun(scope="fragment")
+                        st.button(
+                            "🚫 NGに設定", 
+                            key=f"pop_ng_{page_session_key}_{w}_{idx}", 
+                            use_container_width=True, 
+                            type="primary" if is_ng else "secondary",
+                            on_click=_set_pop_status,
+                            args=(w, "NG")
+                        )
                     with c_act_ok:
-                        if st.button("✅ OKに設定", key=f"pop_ok_{page_session_key}_{w}_{idx}", use_container_width=True, type="primary" if is_ok else "secondary"):
-                            draft_dict[w] = "OK"
-                            st.rerun(scope="fragment")
+                        st.button(
+                            "✅ OKに設定", 
+                            key=f"pop_ok_{page_session_key}_{w}_{idx}", 
+                            use_container_width=True, 
+                            type="primary" if is_ok else "secondary",
+                            on_click=_set_pop_status,
+                            args=(w, "OK")
+                        )
                     with c_act_rst:
-                        if st.button("🔄 リセット", key=f"pop_rst_{page_session_key}_{w}_{idx}", use_container_width=True):
-                            draft_dict[w] = "RESET"
-                            st.rerun(scope="fragment")
+                        st.button(
+                            "🔄 リセット", 
+                            key=f"pop_rst_{page_session_key}_{w}_{idx}", 
+                            use_container_width=True,
+                            on_click=_set_pop_status,
+                            args=(w, "RESET")
+                        )
 
                     st.write("---")
-                    st.caption(f"📄 **該当資料一覧 (全 {len(display_samples):,} 件をスクロール確認可能)**:")
+                    st.caption(f"📄 **該当資料一覧 (最大 {min(len(display_samples), 10)} 件表示)**:")
                     with st.container(height=320):
                         if not display_samples:
                             st.info("該当する資料サンプルはありません。")
                         
                         from components.file_utils import make_jps_item_url, make_jps_keyword_url
-                        for s in display_samples:
+                        for s in display_samples[:10]:
                             if isinstance(s, dict):
                                 s_title = s.get("title") or "（無題）"
                                 s_id = s.get("id", "")
@@ -182,9 +223,9 @@ def render_pill_board(
     if cur_limit < total_items:
         btn_txt = f"🔽 次の {items_per_page} 件を読み込む (現在 {cur_limit:,} 件 / 全 {total_items:,} 件)"
         trigger_btn_id = f"load_more_{page_session_key}_{cur_limit}"
-        if st.button(btn_txt, key=trigger_btn_id, type="secondary", use_container_width=True):
+        def _load_more():
             st.session_state[limit_key] = min(total_items, cur_limit + items_per_page)
-            st.rerun(scope="fragment")
+        st.button(btn_txt, key=trigger_btn_id, type="secondary", use_container_width=True, on_click=_load_more)
     else:
         st.caption(f"✅ 全 {total_items:,} 件のキーワードを表示完了しました。")
 
