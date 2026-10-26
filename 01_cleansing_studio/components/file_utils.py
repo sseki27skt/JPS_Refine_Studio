@@ -137,8 +137,9 @@ def make_rich_search_links_md(word: str) -> str:
 def safe_save_json(data, target_path: str) -> bool:
     """
     データ構造（dict/list等）を一時ファイルに書き出してからアトミックにリネーム保存。
-    書き込み途中の破損を防ぐ。
+    書き込み途中の破損を防ぐとともに、Windows環境でのWinError 32（ファイルロック競合）に対応。
     """
+    import time
     try:
         dir_name = os.path.dirname(target_path)
         if dir_name:
@@ -148,7 +149,18 @@ def safe_save_json(data, target_path: str) -> bool:
         with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
-        os.replace(temp_path, target_path)
+        # WindowsのWinError 32対策（リトライ機構）
+        for attempt in range(10):
+            try:
+                os.replace(temp_path, target_path)
+                break
+            except (PermissionError, OSError):
+                if attempt == 9:
+                    with open(target_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                else:
+                    time.sleep(0.05 * (attempt + 1))
+
         return True
     except Exception as e:
         if 'temp_path' in locals() and os.path.exists(temp_path):

@@ -45,10 +45,27 @@ def save_acquisition_manifest(manifest_data: dict, manifest_file: str = None) ->
         manifest_file = DEFAULT_MANIFEST_FILE
     try:
         os.makedirs(os.path.dirname(os.path.abspath(manifest_file)), exist_ok=True)
-        tmp_file = f"{manifest_file}.tmp"
+        tmp_file = f"{manifest_file}.{os.getpid()}_{time.time_ns()}.tmp"
         with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(manifest_data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_file, manifest_file)
+        
+        # WindowsのWinError 32対策（リトライ機構）
+        for attempt in range(10):
+            try:
+                os.replace(tmp_file, manifest_file)
+                break
+            except (PermissionError, OSError):
+                if attempt == 9:
+                    with open(manifest_file, 'w', encoding='utf-8') as f:
+                        json.dump(manifest_data, f, ensure_ascii=False, indent=2)
+                else:
+                    time.sleep(0.05 * (attempt + 1))
+        
+        if os.path.exists(tmp_file):
+            try:
+                os.remove(tmp_file)
+            except Exception:
+                pass
         logger.info(f"Acquisition manifest saved: {manifest_file}")
         return True
     except Exception as e:
@@ -68,18 +85,33 @@ PREFIX_MAP = {
 
 
 def is_process_alive(pid: int) -> bool:
-    """PIDで指定されたプロセスが現在生存しているかを判定 (macOS/Linux)"""
+    """PIDで指定されたプロセスが現在生存しているかを判定 (Windows / macOS / Linux クロスプラットフォーム対応)"""
     if pid is None or pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            exit_code = ctypes.c_ulong()
+            success = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return bool(success and (exit_code.value == STILL_ACTIVE))
+        except Exception:
+            return True  # 権限不足等で取得不能な場合は誤検知防止のためTrueとする
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
 
 
 def get_job_status(status_file: str = None) -> dict:
-    """現在の取得ジョブステータスを取得（プロセス死活監視・自動回復付き）"""
+    """現在の取得ジョブステータスを取得（プロセス死活監視・自動回復・リトライ付き）"""
     if status_file is None:
         status_file = DEFAULT_STATUS_FILE
     if not os.path.exists(status_file):
@@ -95,10 +127,17 @@ def get_job_status(status_file: str = None) -> dict:
             "eta_seconds": None,
             "error_message": None
         }
-    try:
-        with open(status_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except Exception:
+
+    data = None
+    for attempt in range(5):
+        try:
+            with open(status_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            break
+        except (PermissionError, json.JSONDecodeError, OSError):
+            time.sleep(0.03 * (attempt + 1))
+
+    if data is None:
         return {
             "pid": None,
             "status": "IDLE",
@@ -120,14 +159,36 @@ def get_job_status(status_file: str = None) -> dict:
 
 
 def save_job_status(data: dict, status_file: str = None):
-    """ジョブステータスをファイルにアトミック書き込み"""
+    """ジョブステータスをファイルにアトミック書き込み（Windowsファイルロック対応・リトライ付き）"""
     if status_file is None:
         status_file = DEFAULT_STATUS_FILE
     os.makedirs(os.path.dirname(status_file), exist_ok=True)
-    tmp_file = f"{status_file}.tmp"
-    with open(tmp_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_file, status_file)
+    # プロセスIDとナノ秒を付与して一時ファイル名の衝突を完全に回避
+    tmp_file = f"{status_file}.{os.getpid()}_{time.time_ns()}.tmp"
+    try:
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        # WindowsのWinError 32 (プロセス競合) に対する指数バックオフリートライ
+        for attempt in range(10):
+            try:
+                os.replace(tmp_file, status_file)
+                break
+            except (PermissionError, OSError):
+                if attempt == 9:
+                    try:
+                        with open(status_file, 'w', encoding='utf-8') as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                    except Exception:
+                        pass
+                else:
+                    time.sleep(0.05 * (attempt + 1))
+    finally:
+        if os.path.exists(tmp_file):
+            try:
+                os.remove(tmp_file)
+            except Exception:
+                pass
 
 
 def update_job_status(

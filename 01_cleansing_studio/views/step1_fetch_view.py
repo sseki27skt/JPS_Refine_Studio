@@ -155,6 +155,25 @@ def _on_apply_manual_params():
     st.session_state["msg_success"] = "設定パラメータの保存・適用が完了しました。"
 
 
+def _launch_background_worker(worker_cmd: list) -> subprocess.Popen:
+    """Windows / macOS / Linux クロスプラットフォームで親コンソールから完全に独立したワーカーを起動"""
+    popen_kwargs = {}
+    if sys.platform == "win32":
+        # Windows: CREATE_NEW_PROCESS_GROUP + DETACHED_PROCESS / CREATE_NO_WINDOW
+        # これにより親プロセス(Streamlit)のコンソールイベント（シグナル2/CTRL_C_EVENT）から完全に切り離される
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP
+        if hasattr(subprocess, "DETACHED_PROCESS"):
+            flags |= subprocess.DETACHED_PROCESS
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            flags |= subprocess.CREATE_NO_WINDOW
+        popen_kwargs["creationflags"] = flags
+    else:
+        # macOS / Linux: 新しいセッションで実行
+        popen_kwargs["start_new_session"] = True
+
+    return subprocess.Popen(worker_cmd, **popen_kwargs)
+
+
 def render_step1_view(paths: dict):
     """Step 1 画面の描画"""
     st.title("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
@@ -581,7 +600,7 @@ def render_step1_view(paths: dict):
                     if not use_adapt:
                         worker_cmd.append("--no-adaptive")
 
-                    proc = subprocess.Popen(worker_cmd)
+                    proc = _launch_background_worker(worker_cmd)
                     update_job_status(
                         status="RUNNING",
                         stage="build_metadata",
@@ -624,8 +643,8 @@ def render_step1_view(paths: dict):
             if not use_adapt:
                 worker_cmd.append("--no-adaptive")
 
-            # start_new_session=True により、画面遷移やリロードでも親プロセスの影響を受けず独立実行
-            proc = subprocess.Popen(worker_cmd, start_new_session=True)
+            # Windows / macOS / Linux クロスプラットフォームで親コンソールから独立実行
+            proc = _launch_background_worker(worker_cmd)
             update_job_status(
                 status="RUNNING",
                 stage="collect_uris",

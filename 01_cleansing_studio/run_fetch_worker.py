@@ -34,11 +34,23 @@ from modules.logger import logger
 ACTIVE_STATUS_FILE = DEFAULT_STATUS_FILE
 
 
+_is_exiting = False
+
 def handle_exit(signum, frame):
-    """シグナル受信時にステータスを更新して安全に終了"""
-    logger.info(f"[Worker] シグナル {signum} を受信。ジョブを中断ステータスに設定します...")
-    update_job_status(status="STOPPED", error_message="シグナル受信によりプロセスが中断されました。", status_file=ACTIVE_STATUS_FILE)
-    sys.exit(0)
+    """シグナル受信時にステータスを更新して安全に終了（多重再入防止）"""
+    global _is_exiting
+    if _is_exiting:
+        return
+    _is_exiting = True
+
+    try:
+        logger.info(f"[Worker] シグナル {signum} を受信。ジョブを中断ステータスに設定します...")
+        print(f"[Worker] シグナル {signum} を受信。ジョブを中断ステータスに設定します...")
+        update_job_status(status="STOPPED", error_message="シグナル受信によりプロセスが中断されました。", status_file=ACTIVE_STATUS_FILE)
+    except Exception as e:
+        logger.error(f"[Worker] 終了処理中のエラー: {e}")
+    finally:
+        sys.exit(0)
 
 
 def main():
