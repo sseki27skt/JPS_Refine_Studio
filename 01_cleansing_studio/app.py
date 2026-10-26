@@ -44,9 +44,17 @@ ws_name_map = {w["id"]: w["name"] for w in workspaces}
 st.sidebar.title("JS-Refine Studio")
 st.sidebar.caption("人文学文化資源 メタデータ精緻化システム")
 
+# ワークスペースが未作成（0件）の場合の特別ローンチハンドリング
+if not workspaces:
+    st.sidebar.markdown("---")
+    st.sidebar.info("💡 **研究プロジェクトが未作成です**\n\n右側の画面から新規プロジェクトを立ち上げてください。")
+    # 空のパス辞書でプロジェクト立ち上げビューを直接描画
+    render_workspace_view({}, wm)
+    st.stop()
+
 # ワークスペース切替セレクタ
 if "active_workspace_id" not in st.session_state or st.session_state["active_workspace_id"] not in ws_ids:
-    st.session_state["active_workspace_id"] = wm.DEFAULT_WORKSPACE_ID
+    st.session_state["active_workspace_id"] = ws_ids[0]
 
 current_ws_idx = ws_ids.index(st.session_state["active_workspace_id"]) if st.session_state["active_workspace_id"] in ws_ids else 0
 
@@ -98,6 +106,9 @@ def format_menu_label(opt):
     p = status_map.get(opt)
     st_mark = check_status(p) if p else "○"
     return f"{st_mark} {opt}"
+
+if "main_menu_choice" not in st.session_state or st.session_state["main_menu_choice"] not in menu_options:
+    st.session_state["main_menu_choice"] = "📁 プロジェクト・履歴マネージャー"
 
 choice = st.sidebar.radio("工程を選択:", menu_options, format_func=format_menu_label, key="main_menu_choice")
 

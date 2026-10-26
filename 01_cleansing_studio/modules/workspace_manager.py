@@ -30,8 +30,8 @@ class WorkspaceManager:
     研究プロジェクト（ワークスペース）とフィルタリングスナップショットの管理クラス
     """
 
-    DEFAULT_WORKSPACE_ID = "gagaku_default"
-    DEFAULT_WORKSPACE_NAME = "雅楽コレクション（デフォルト）"
+    DEFAULT_WORKSPACE_ID = "default_project"
+    DEFAULT_WORKSPACE_NAME = "メインプロジェクト"
 
     def __init__(self, project_root: Optional[str] = None):
         if project_root is None:
@@ -53,39 +53,9 @@ class WorkspaceManager:
 
     def _migrate_legacy_data_if_needed(self):
         """
-        既存の data/ 直下および 01_cleansing_studio/rules/ の資産を検知し、
-        安全に gagaku_default ワークスペースへ移行・シンボリックリンク維持
+        既存の data/ 直下にレガシーデータ実体が存在する場合のみ検知し、
+        安全にレガシー用ワークスペースへ移行・シンボリックリンク維持
         """
-        default_ws_dir = os.path.join(self.workspaces_root, self.DEFAULT_WORKSPACE_ID)
-        meta_file = os.path.join(default_ws_dir, "workspace_meta.json")
-
-        if os.path.exists(meta_file):
-            return  # 既に移行済み
-
-        logger.info(f"[WorkspaceManager] 既存データの初期ワークスペース '{self.DEFAULT_WORKSPACE_ID}' への移行を確認中...")
-
-        # ワークスペースディレクトリ作成
-        ws_data_dir = os.path.join(default_ws_dir, "data")
-        ws_rules_dir = os.path.join(default_ws_dir, "rules")
-        ws_snapshots_dir = os.path.join(default_ws_dir, "snapshots")
-        ws_exports_dir = os.path.join(default_ws_dir, "exports")
-        os.makedirs(ws_data_dir, exist_ok=True)
-        os.makedirs(ws_rules_dir, exist_ok=True)
-        os.makedirs(ws_snapshots_dir, exist_ok=True)
-        os.makedirs(ws_exports_dir, exist_ok=True)
-
-        # 1. 既存ルールのコピー
-        if os.path.exists(self.default_rules_dir):
-            for fname in os.listdir(self.default_rules_dir):
-                src = os.path.join(self.default_rules_dir, fname)
-                dst = os.path.join(ws_rules_dir, fname)
-                if os.path.isfile(src) and not os.path.exists(dst):
-                    try:
-                        shutil.copy2(src, dst)
-                    except Exception as e:
-                        logger.warning(f"Error copying rule file {fname}: {e}")
-
-        # 2. 既存データファイルの移行（巨大ファイルは移動 + シンボリックリンク維持で後方互換性を確保）
         legacy_data_files = [
             "raw_metadata.jsonl",
             "metadata_store.duckdb",
@@ -106,40 +76,75 @@ class WorkspaceManager:
             "benchmark_sample_10k.jsonl"
         ]
 
-        for fname in legacy_data_files:
+        # data/ 直下に実際の未移行レガシーファイルがあるか判定
+        existing_legacy = [f for f in legacy_data_files if os.path.exists(os.path.join(self.data_root, f)) and not os.path.islink(os.path.join(self.data_root, f))]
+        if not existing_legacy:
+            return  # 移行すべき実データがなければ何もしない
+
+        legacy_ws_id = "legacy_archive"
+        target_ws_dir = os.path.join(self.workspaces_root, legacy_ws_id)
+        meta_file = os.path.join(target_ws_dir, "workspace_meta.json")
+
+        if os.path.exists(meta_file):
+            return  # 既に移行済み
+
+        logger.info(f"[WorkspaceManager] 既存の未移行レガシーデータ（{len(existing_legacy)}件）を '{legacy_ws_id}' への移行を開始します...")
+
+        # ワークスペースディレクトリ作成
+        ws_data_dir = os.path.join(target_ws_dir, "data")
+        ws_rules_dir = os.path.join(target_ws_dir, "rules")
+        ws_snapshots_dir = os.path.join(target_ws_dir, "snapshots")
+        ws_exports_dir = os.path.join(target_ws_dir, "exports")
+        os.makedirs(ws_data_dir, exist_ok=True)
+        os.makedirs(ws_rules_dir, exist_ok=True)
+        os.makedirs(ws_snapshots_dir, exist_ok=True)
+        os.makedirs(ws_exports_dir, exist_ok=True)
+
+        # 1. 既存ルールのコピー
+        if os.path.exists(self.default_rules_dir):
+            for fname in os.listdir(self.default_rules_dir):
+                src = os.path.join(self.default_rules_dir, fname)
+                dst = os.path.join(ws_rules_dir, fname)
+                if os.path.isfile(src) and not os.path.exists(dst):
+                    try:
+                        shutil.copy2(src, dst)
+                    except Exception as e:
+                        logger.warning(f"Error copying rule file {fname}: {e}")
+
+        # 2. 既存データファイルの移行（巨大ファイルは移動 + シンボリックリンク維持で後方互換性を確保）
+        for fname in existing_legacy:
             src = os.path.join(self.data_root, fname)
             dst = os.path.join(ws_data_dir, fname)
 
-            if os.path.exists(src) and not os.path.islink(src):
+            try:
+                # 実体をワークスペース側に移動
+                shutil.move(src, dst)
+                # 既存の絶対パス/相対パス参照を壊さないため、元位置にシンボリックリンクを作成
                 try:
-                    # 実体をワークスペース側に移動
-                    shutil.move(src, dst)
-                    # 既存の絶対パス/相対パス参照を壊さないため、元位置にシンボリックリンクを作成
-                    try:
-                        # 相対シンボリックリンク
-                        rel_target = os.path.relpath(dst, self.data_root)
-                        os.symlink(rel_target, src)
-                    except Exception as sym_err:
-                        logger.debug(f"Symlink creation skipped or failed: {sym_err}")
-                except Exception as e:
-                    logger.warning(f"Error migrating {fname}: {e}")
+                    rel_target = os.path.relpath(dst, self.data_root)
+                    os.symlink(rel_target, src)
+                except Exception as sym_err:
+                    logger.debug(f"Symlink creation skipped or failed: {sym_err}")
+            except Exception as e:
+                logger.warning(f"Error migrating {fname}: {e}")
 
         # 3. メタデータの生成
         now_str = datetime.datetime.now().isoformat()
         meta = {
-            "id": self.DEFAULT_WORKSPACE_ID,
-            "name": self.DEFAULT_WORKSPACE_NAME,
-            "description": "初期構築された雅楽関連の書誌メタデータプールおよび精緻化ルール",
+            "id": legacy_ws_id,
+            "name": "過去データアーカイブ",
+            "description": "初期システムから引き継がれた書誌メタデータプール",
+            "research_theme": "",
             "created_at": now_str,
             "updated_at": now_str
         }
         with open(meta_file, 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"[WorkspaceManager] 初期ワークスペース '{self.DEFAULT_WORKSPACE_ID}' のセットアップが完了しました。")
+        logger.info(f"[WorkspaceManager] レガシーデータのアーカイブ移行が完了しました: '{legacy_ws_id}'")
 
     def list_workspaces(self) -> List[Dict[str, Any]]:
-        """全ワークスペースの一覧を取得"""
+        """全ワークスペースの一覧を取得（作成日時の降順）"""
         workspaces = []
         if not os.path.exists(self.workspaces_root):
             return workspaces
@@ -168,19 +173,19 @@ class WorkspaceManager:
                     "id": entry,
                     "name": entry,
                     "description": "",
+                    "research_theme": "",
                     "created_at": "",
                     "updated_at": ""
                 })
 
-        # デフォルトを先頭、あとは作成日降順
-        workspaces.sort(key=lambda x: (x.get("id") != self.DEFAULT_WORKSPACE_ID, x.get("created_at", "")), reverse=True)
-        # default を最優先
-        workspaces.sort(key=lambda x: 0 if x.get("id") == self.DEFAULT_WORKSPACE_ID else 1)
+        # 作成日時の新しい順にソート
+        workspaces.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return workspaces
 
     def get_workspace(self, ws_id: str) -> Optional[Dict[str, Any]]:
         """特定ワークスペースの情報を取得"""
-        ws_dir = os.path.join(self.workspaces_root, ws_id)
+        clean_id = self._sanitize_id(ws_id)
+        ws_dir = os.path.join(self.workspaces_root, clean_id)
         meta_path = os.path.join(ws_dir, "workspace_meta.json")
         if not os.path.exists(meta_path):
             return None
@@ -192,12 +197,12 @@ class WorkspaceManager:
         except Exception:
             return None
 
-    def create_workspace(self, ws_id: str, name: str, description: str = "", clone_from: Optional[str] = None) -> Dict[str, Any]:
-        """新規ワークスペースを作成（既存ワークスペースからのルール等の複製も対応）"""
+    def create_workspace(self, ws_id: str, name: str, description: str = "", research_theme: str = "", clone_from: Optional[str] = None) -> Dict[str, Any]:
+        """新規ワークスペースを作成（研究テーマの保存および既存ワークスペースからのルール等の複製も対応）"""
         clean_id = self._sanitize_id(ws_id)
         ws_dir = os.path.join(self.workspaces_root, clean_id)
         if os.path.exists(ws_dir):
-            raise ValueError(f"ワークスペースID '{clean_id}' は既に存在します。")
+            raise ValueError(f"プロジェクトID '{clean_id}' は既に存在します。別のIDを指定してください。")
 
         ws_data_dir = os.path.join(ws_dir, "data")
         ws_rules_dir = os.path.join(ws_dir, "rules")
@@ -227,6 +232,7 @@ class WorkspaceManager:
             "id": clean_id,
             "name": name.strip() or clean_id,
             "description": description.strip(),
+            "research_theme": research_theme.strip(),
             "created_at": now_str,
             "updated_at": now_str,
             "cloned_from": clone_from
@@ -239,38 +245,33 @@ class WorkspaceManager:
         return meta
 
     def delete_workspace(self, ws_id: str) -> bool:
-        """ワークスペースを削除（デフォルトワークスペースは保護）"""
-        if ws_id == self.DEFAULT_WORKSPACE_ID:
-            raise ValueError("デフォルトワークスペースは削除できません。")
-
-        ws_dir = os.path.join(self.workspaces_root, ws_id)
+        """ワークスペースを削除"""
+        clean_id = self._sanitize_id(ws_id)
+        ws_dir = os.path.join(self.workspaces_root, clean_id)
         if not os.path.exists(ws_dir):
             return False
 
         shutil.rmtree(ws_dir)
-        logger.info(f"[WorkspaceManager] ワークスペース削除完了: {ws_id}")
+        logger.info(f"[WorkspaceManager] ワークスペース削除完了: {clean_id}")
         return True
 
-    def get_workspace_paths(self, ws_id: str) -> Dict[str, str]:
+    def get_workspace_paths(self, ws_id: Optional[str] = None, create_dirs: bool = True) -> Dict[str, str]:
         """
         既存の app.py の PATHS 辞書と100%互換のパス辞書を生成
         """
-        clean_id = self._sanitize_id(ws_id)
+        clean_id = self._sanitize_id(ws_id) if ws_id else "unassigned_project"
         ws_dir = os.path.join(self.workspaces_root, clean_id)
-        if not os.path.exists(ws_dir):
-            # 存在しない場合はデフォルトにフォールバック
-            clean_id = self.DEFAULT_WORKSPACE_ID
-            ws_dir = os.path.join(self.workspaces_root, clean_id)
 
         ws_data_dir = os.path.join(ws_dir, "data")
         ws_rules_dir = os.path.join(ws_dir, "rules")
         ws_snapshots_dir = os.path.join(ws_dir, "snapshots")
         ws_exports_dir = os.path.join(ws_dir, "exports")
 
-        os.makedirs(ws_data_dir, exist_ok=True)
-        os.makedirs(ws_rules_dir, exist_ok=True)
-        os.makedirs(ws_snapshots_dir, exist_ok=True)
-        os.makedirs(ws_exports_dir, exist_ok=True)
+        if create_dirs and ws_id:
+            os.makedirs(ws_data_dir, exist_ok=True)
+            os.makedirs(ws_rules_dir, exist_ok=True)
+            os.makedirs(ws_snapshots_dir, exist_ok=True)
+            os.makedirs(ws_exports_dir, exist_ok=True)
 
         return {
             # --- 既存 PATHS 辞書互換キー ---
@@ -592,9 +593,10 @@ class WorkspaceManager:
 
             target_name = new_name or orig_meta.get("name") or target_id
             target_desc = orig_meta.get("description", "") + f" (インポート元: {os.path.basename(package_zip_path)})"
+            target_theme = orig_meta.get("research_theme", "")
 
             # 新規ワークスペース作成
-            new_meta = self.create_workspace(target_id, target_name, target_desc)
+            new_meta = self.create_workspace(target_id, target_name, target_desc, research_theme=target_theme)
             ws_paths = self.get_workspace_paths(target_id)
             ws_dir = ws_paths["DIR_WORKSPACE"]
 

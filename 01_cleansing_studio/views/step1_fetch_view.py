@@ -219,11 +219,34 @@ def render_step1_view(paths: dict):
         st.error(f"❌ **前回実行時にエラーが発生しました**: `{err}`")
         st.markdown("---")
 
+    # ワークスペース切替検知によるパラメータ初期化
+    cur_ws_id = paths.get("WORKSPACE_ID", "")
+    if st.session_state.get("last_loaded_ws_id") != cur_ws_id:
+        st.session_state["last_loaded_ws_id"] = cur_ws_id
+        if "expansion_res" in st.session_state:
+            del st.session_state["expansion_res"]
+        # 各種手動入力フィールドのキャッシュもリセット
+        for k in ["input_kw_manual", "input_ndc_multiselect", "input_ndc_codes_manual", 
+                  "input_exclude_ndc_multiselect", "input_exclude_ndc_codes_manual", 
+                  "input_title_regex_manual", "input_desc_regex_manual", "input_domain_def_manual", 
+                  "input_rdf_types_multiselect", "input_rdf_types_whitelist_multiselect"]:
+            if k in st.session_state:
+                del st.session_state[k]
+
     # --- 1. テーマ入力 ---
+    from modules.workspace_manager import WorkspaceManager
+    wm_temp = WorkspaceManager()
+    active_ws = wm_temp.get_workspace(cur_ws_id) if cur_ws_id else None
+    default_theme = ""
+    if active_ws:
+        default_theme = active_ws.get("research_theme") or active_ws.get("name") or ""
+    if not default_theme:
+        default_theme = "日本の文化資源・古典資料"
+
     theme_input = st.text_input(
         "対象テーマ・関心領域の指定:", 
-        value="日本の古典籍における楽譜資料", 
-        help="例: 日本の古典籍における楽譜資料、江戸時代の古地図、能楽演目文献 など"
+        value=default_theme, 
+        help="例: 江戸時代の浮世絵版画資料、古地図・絵図コレクション、日本の古典籍における楽譜資料 など"
     )
 
     # session_state の初期化（初回ロード時）

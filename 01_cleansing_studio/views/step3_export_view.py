@@ -52,7 +52,7 @@ flowchart TD
     D --> E["【Stage 3: LLM推論】<br>判定保留 (GREY) 群のセマンティック分類<br>(投入: {llm_total:,} 件 ➔ 合格: {llm_pass:,} 件 / 除外: {llm_disc:,} 件)"]
     D -. 合格バイパス .-> F["【Stage 4: 専門家査読】<br>人手確認・手動オーバーライド<br>(修正: {human_ov:,} 件)"]
     E --> F
-    F --> G["【最終採択データセット】<br>真正楽譜資料メタデータ<br>(N = {final_ad:,} 件)"]
+    F --> G["【最終採択データセット】<br>確定・採択対象資料メタデータ<br>(N = {final_ad:,} 件)"]
 ```
 
 ---
@@ -179,13 +179,17 @@ def render_step3_view(paths: dict):
                     if prov_val:
                         provider = str(prov_val).split('/')[-1]
 
-                genre = "古典資料/その他"
+                genre = "文化資源/一般"
                 t_desc = (str(title) + " " + str(desc)).lower()
-                if any(k in t_desc for k in ["雅楽", "笙", "篳篥", "竜笛"]): genre = "雅楽"
-                elif any(k in t_desc for k in ["謡", "能", "観世", "宝生"]): genre = "能楽/謡曲"
-                elif any(k in t_desc for k in ["三味線", "長唄", "地歌", "義太夫"]): genre = "三味線音楽"
+                if any(k in t_desc for k in ["浮世絵", "錦絵", "版画", "広重", "北斎", "歌麿"]): genre = "浮世絵/版画"
+                elif any(k in t_desc for k in ["絵図", "古地図", "道中図", "鳥瞰図"]): genre = "地図/絵図"
+                elif any(k in t_desc for k in ["古文書", "書状", "日記", "記録", "系図"]): genre = "古文書/古記録"
+                elif any(k in t_desc for k in ["雅楽", "笙", "篳篥", "竜笛", "舞楽"]): genre = "雅楽/伝統音楽"
+                elif any(k in t_desc for k in ["謡", "能", "観世", "宝生", "狂言"]): genre = "能楽/狂言"
+                elif any(k in t_desc for k in ["三味線", "長唄", "地歌", "義太夫"]): genre = "三味線音楽/近世邦楽"
                 elif any(k in t_desc for k in ["尺八", "琴古", "都山"]): genre = "尺八楽"
                 elif any(k in t_desc for k in ["琵琶", "平曲"]): genre = "琵琶楽"
+                elif any(k in t_desc for k in ["絵巻", "画帖", "絵画", "掛軸"]): genre = "絵画/絵巻"
 
                 image = raw_data.get('schema:image', '')
                 if isinstance(image, list) and image: image = image[0]
