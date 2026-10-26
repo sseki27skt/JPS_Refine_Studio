@@ -441,10 +441,9 @@ def render_step2a_view(paths: dict):
         draft_ab = st.session_state["draft_about_changes"]
         draft_count = len(draft_ab)
 
-        if draft_count > 0:
-            st.warning(f"現在 **{draft_count} 件** のキーワードが仮選択中です。")
-            if st.button(f"⚡ 仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_cluster_draft_ctrl"):
-                for kw, status in draft_ab.items():
+        def _apply_and_save_about_draft():
+            if draft_ab:
+                for kw, status in list(draft_ab.items()):
                     if status == "NG":
                         current_ng.add(kw)
                         current_ok.discard(kw)
@@ -463,6 +462,11 @@ def render_step2a_view(paths: dict):
                 st.session_state["chk_view_ver"] += 1
                 st.success("判別結果を確定し about_rules.json へ保存しました。")
                 st.rerun()
+
+        if draft_count > 0:
+            st.warning(f"現在 **{draft_count} 件** のキーワードが仮選択中です。")
+            if st.button(f"⚡ 仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_cluster_draft_ctrl"):
+                _apply_and_save_about_draft()
         else:
             st.caption("✅ すべてのルールが保存済みです。クラスタやピルを選択すると確定ボタンが表示されます。")
 
@@ -1017,7 +1021,8 @@ def render_step2a_view(paths: dict):
             current_ok=current_ok,
             draft_dict=draft_ab,
             click_action_mode=click_action_mode,
-            page_session_key="about_single_page"
+            page_session_key="about_single_page",
+            on_confirm_save=_apply_and_save_about_draft
         )
 
         c_hdr1, c_hdr2 = st.columns([3, 2])
@@ -1025,30 +1030,9 @@ def render_step2a_view(paths: dict):
             st.markdown(f"判定対象キーワード (該当: **{len(filtered_ranking)}** 件)")
         with c_hdr2:
             draft_count = len(draft_ab)
-            btn_apply_label = f"仮設定 ({draft_count} 件) の一括適用" if draft_count > 0 else "判定の一括適用"
-            if st.button(btn_apply_label, type="primary" if draft_count > 0 else "secondary", use_container_width=True, key="btn_single_draft_apply"):
-                if draft_ab:
-                    for kw, status in draft_ab.items():
-                        if status == "NG":
-                            current_ng.add(kw)
-                            current_ok.discard(kw)
-                        elif status == "OK":
-                            current_ok.add(kw)
-                            current_ng.discard(kw)
-                        elif status == "RESET":
-                            current_ng.discard(kw)
-                            current_ok.discard(kw)
-                    draft_ab.clear()
-                    
-                    save_dict = {}
-                    for k in current_ng: save_dict[k] = "NG"
-                    for k in current_ok: save_dict[k] = "OK"
-                    safe_save_json(save_dict, about_rules_path)
-
-                    st.session_state["chk_view_ver"] += 1
-                    st.success("仮判定をルールへ一括適用しました。")
-                    st.rerun()
-                else:
+            if draft_count > 0:
+                if st.button(f"⚡ 仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_single_draft_apply"):
+                    _apply_and_save_about_draft()
                     st.info("現在仮選択中のキーワードはありません。")
 
     # -------------------------------------------------------------------------

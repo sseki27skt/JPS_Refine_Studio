@@ -111,30 +111,34 @@ def get_cached_active_ngram_counts(file_path, file_mtime, ng_rules_tuple, ok_rul
 
 
 def get_parent_rule(word: str, ng_set: set, ok_set: set) -> tuple:
-    for ng in sorted(list(ng_set), key=len):
-        if len(ng) < len(word) and ng in word:
-            return "NG", ng
-    for ok in sorted(list(ok_set), key=len):
-        if len(ok) < len(word) and ok in word:
-            return "OK", ok
+    """
+    対象文字列 word の部分文字列が ng_set / ok_set に含まれるかを最短一致で超高速判定 (O(L^2))
+    """
+    L = len(word)
+    # 最短の部分文字列から順にチェック (親ルール優先判定)
+    for sub_len in range(2, L):
+        for i in range(L - sub_len + 1):
+            sub = word[i:i+sub_len]
+            if sub in ng_set:
+                return "NG", sub
+    for sub_len in range(2, L):
+        for i in range(L - sub_len + 1):
+            sub = word[i:i+sub_len]
+            if sub in ok_set:
+                return "OK", sub
     return None, None
 
 
-def build_expanded_ngram_rules(ng_set, ok_set, all_ngram_dict):
-    expanded = {}
-    for ng_w in ng_set:
-        expanded[ng_w] = "NG"
-    for ok_w in ok_set:
-        expanded[ok_w] = "OK"
-
-    for n, ranking in all_ngram_dict.items():
-        for word, count, _ in ranking:
-            if word in expanded:
-                continue
-            p_type, p_word = get_parent_rule(word, ng_set, ok_set)
-            if p_type:
-                expanded[word] = p_type
-    return expanded
+def build_expanded_ngram_rules(ng_set, ok_set, all_ngram_dict=None):
+    """
+    確定した NG / OK ルール辞書を生成（不要な子パターンの自動展開を廃止しルール肥大化を防止）
+    """
+    rules = {}
+    for ng in ng_set:
+        rules[ng] = "NG"
+    for ok in ok_set:
+        rules[ok] = "OK"
+    return rules
 
 
 def render_step2b_view(paths: dict):
@@ -208,6 +212,14 @@ def render_step2b_view(paths: dict):
     min_n = 2
     max_n = 9
 
+    # 全 N-gram のドラフト辞書を確実に初期化
+    for n in range(min_n, max_n + 1):
+        if f"draft_n_{n}_changes" not in st.session_state:
+            st.session_state[f"draft_n_{n}_changes"] = {}
+
+    all_draft_keys = [f"draft_n_{n}_changes" for n in range(min_n, max_n + 1)]
+    total_draft_cnt = sum(len(st.session_state.get(k, {})) for k in all_draft_keys if isinstance(st.session_state.get(k), dict))
+
     input_mtime = os.path.getmtime(input_path) if os.path.exists(input_path) else 0
     input_titles = load_filtered_titles(input_path, input_mtime)
     ngram_dict = get_cached_ngrams_from_titles_fast(input_path, input_mtime, min_n, max_n)
@@ -222,6 +234,34 @@ def render_step2b_view(paths: dict):
         tuple(sorted(list(ngram_ng))),
         tuple(sorted(list(ngram_ok)))
     )
+
+    # 共通の確定保存関数
+    def _apply_and_save_ngram_draft():
+        applied_any = False
+        for dk in all_draft_keys:
+            d_map = st.session_state.get(dk, {})
+            if isinstance(d_map, dict) and d_map:
+                for w, status in list(d_map.items()):
+                    if status == "NG":
+                        ngram_ng.add(w)
+                        ngram_ok.discard(w)
+                        applied_any = True
+                    elif status == "OK":
+                        ngram_ok.add(w)
+                        ngram_ng.discard(w)
+                        applied_any = True
+                    elif status == "RESET":
+                        ngram_ng.discard(w)
+                        ngram_ok.discard(w)
+                        applied_any = True
+                d_map.clear()
+        
+        if applied_any:
+            save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok)
+            safe_save_json(save_dict, ngram_rules_path)
+            st.session_state["ngram_view_ver"] += 1
+            st.success("判別結果を確定し ngram_rules.json へ保存しました。")
+            st.rerun()
 
     # 3カラム / 2ペイン レイアウト（左: メイン作業領域 70% ｜ 右: 固定コントロール＆進捗パネル 30%）
     col_main, col_ctrl = st.columns([7, 3])
@@ -253,42 +293,14 @@ def render_step2b_view(paths: dict):
 
         st.write("---")
 
-        # 2. 仮設定の一括適用 ＆ 保存アクション
+        # 2. 仮選択の一括適用 ＆ 保存アクション
         st.markdown("##### ⚡ ルール確定 ＆ 保存")
-        
-        all_draft_keys = [k for k in st.session_state.keys() if k.startswith("draft_n_")]
-        total_draft_cnt = sum(len(st.session_state[k]) for k in all_draft_keys if isinstance(st.session_state[k], dict))
-
         if total_draft_cnt > 0:
             st.warning(f"現在 **{total_draft_cnt} 件** のパターンが仮選択中です。")
-            if st.button(f"⚡ 全仮設定 ({total_draft_cnt} 件) を確定適用", type="primary", use_container_width=True, key="btn_apply_all_ngram_draft_ctrl"):
-                for dk in all_draft_keys:
-                    d_map = st.session_state[dk]
-                    if isinstance(d_map, dict):
-                        for w, status in d_map.items():
-                            if status == "NG":
-                                ngram_ng.add(w)
-                                ngram_ok.discard(w)
-                            elif status == "OK":
-                                ngram_ok.add(w)
-                                ngram_ng.discard(w)
-                            elif status == "RESET":
-                                ngram_ng.discard(w)
-                                ngram_ok.discard(w)
-                        d_map.clear()
-                
-                save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
-                safe_save_json(save_dict, ngram_rules_path)
-                st.session_state["ngram_view_ver"] += 1
-                st.success("判別結果をルールへ確定適用・保存しました。")
-                st.rerun()
+            if st.button(f"⚡ 仮設定 ({total_draft_cnt} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_all_ngram_draft_ctrl"):
+                _apply_and_save_ngram_draft()
         else:
-            st.caption("各タブで OK / NG を選択後、ここで一括確定できます。")
-
-        if st.button("💾 ngram_rules.json に手動保存", use_container_width=True, key="btn_save_ngram_rules_ctrl"):
-            save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
-            safe_save_json(save_dict, ngram_rules_path)
-            st.success(f"N-Gram ルールを保存しました (全 {len(save_dict):,} ルール)。")
+            st.caption("✅ すべてのルールが保存済みです。ピルをクリックすると仮選択され、確定ボタンが表示されます。")
 
         st.write("---")
 
@@ -680,7 +692,8 @@ def render_step2b_view(paths: dict):
                 draft_dict=draft_n,
                 click_action_mode=c_mode_n,
                 page_session_key=f"ngram_page_n_{n_val}",
-                parent_rule_func=lambda w: get_parent_rule(w, ngram_ng, ngram_ok)
+                parent_rule_func=lambda w: get_parent_rule(w, ngram_ng, ngram_ok),
+                on_confirm_save=_apply_and_save_ngram_draft
             )
 
         # ---------------------------------------------------------------------
@@ -688,19 +701,49 @@ def render_step2b_view(paths: dict):
         # ---------------------------------------------------------------------
         with tab_rules:
             st.markdown(f"### 現在の N-Gram NG / OK 登録ルール (NG: {len(ngram_ng)} 件 / OK: {len(ngram_ok)} 件)")
+
+            # 冗長ルールの自動クリーンアップツール
+            with st.expander("🧹 登録ルールの最適化・冗長パターン一括クリーンアップ", expanded=False):
+                st.caption("より短い親パターン（例:『楽譜』）が既にNGになっている場合、それを含む長い子パターン（例:『大日本楽譜集』）は重複しており不要です。これらを整理してルールファイルを大幅に軽量化・高速化します。")
+                if st.button("冗長な子パターンを自動整理してスリム化", key="btn_clean_redundant_rules"):
+                    ng_sorted = sorted(list(ngram_ng), key=len)
+                    minimal_ng = set()
+                    for w in ng_sorted:
+                        covered = any(sub in w for sub in minimal_ng)
+                        if not covered:
+                            minimal_ng.add(w)
+                    removed_cnt = len(ngram_ng) - len(minimal_ng)
+                    ngram_ng.clear()
+                    ngram_ng.update(minimal_ng)
+                    save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok)
+                    safe_save_json(save_dict, ngram_rules_path)
+                    st.session_state["ngram_view_ver"] += 1
+                    st.success(f"重複・冗長な {removed_cnt:,} 件のパターンを整理しました（現在 {len(ngram_ng):,} 件）。")
+                    st.rerun()
+
             cn_manage_ng, cn_manage_ok = st.columns(2)
             with cn_manage_ng:
                 st.markdown(f"#### 🚫 除外(NG) N-gram パターン ({len(ngram_ng)} 件)")
                 if ngram_ng:
+                    search_ng = st.text_input("🔍 NGパターン内を検索:", key="txt_search_ng_pills", placeholder="絞り込みキーワードを入力...")
                     n_ng_sorted = sorted(list(ngram_ng))
+                    if search_ng:
+                        disp_ng_list = [w for w in n_ng_sorted if search_ng.lower() in w.lower()]
+                    else:
+                        disp_ng_list = n_ng_sorted[:80]
+
+                    st.caption(f"表示中: {len(disp_ng_list)} 件 / 全 {len(ngram_ng)} 件" + (" (上位80件を表示中、検索で絞り込めます)" if not search_ng and len(n_ng_sorted) > 80 else ""))
+
                     try:
-                        selected_n_ng_pills = st.pills("選択して削除するパターンをクリック:", options=n_ng_sorted, selection_mode="multi", key="pills_ngram_ng")
+                        selected_n_ng_pills = st.pills("解除するパターンを選択:", options=disp_ng_list, selection_mode="multi", key="pills_ngram_ng")
                     except AttributeError:
-                        selected_n_ng_pills = st.multiselect("削除するパターンを選択:", options=n_ng_sorted, key="ms_ngram_ng_fallback")
+                        selected_n_ng_pills = st.multiselect("解除するパターンを選択:", options=disp_ng_list, key="ms_ngram_ng_fallback")
 
                     if st.button("選択パターンを NG ルールから解除", key="btn_del_n_ng_pills", type="primary", use_container_width=True):
                         if selected_n_ng_pills:
                             ngram_ng.difference_update(selected_n_ng_pills)
+                            save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok)
+                            safe_save_json(save_dict, ngram_rules_path)
                             st.session_state["ngram_view_ver"] += 1
                             st.success(f"{len(selected_n_ng_pills)} 件のパターンを NG ルールから削除しました。")
                             st.rerun()
@@ -712,15 +755,25 @@ def render_step2b_view(paths: dict):
             with cn_manage_ok:
                 st.markdown(f"#### ✅ 保持(OK) N-gram パターン ({len(ngram_ok)} 件)")
                 if ngram_ok:
+                    search_ok = st.text_input("🔍 OKパターン内を検索:", key="txt_search_ok_pills", placeholder="絞り込みキーワードを入力...")
                     n_ok_sorted = sorted(list(ngram_ok))
+                    if search_ok:
+                        disp_ok_list = [w for w in n_ok_sorted if search_ok.lower() in w.lower()]
+                    else:
+                        disp_ok_list = n_ok_sorted[:80]
+
+                    st.caption(f"表示中: {len(disp_ok_list)} 件 / 全 {len(ngram_ok)} 件" + (" (上位80件を表示中、検索で絞り込めます)" if not search_ok and len(n_ok_sorted) > 80 else ""))
+
                     try:
-                        selected_n_ok_pills = st.pills("選択して削除するパターンをクリック:", options=n_ok_sorted, selection_mode="multi", key="pills_ngram_ok")
+                        selected_n_ok_pills = st.pills("解除するパターンを選択:", options=disp_ok_list, selection_mode="multi", key="pills_ngram_ok")
                     except AttributeError:
-                        selected_n_ok_pills = st.multiselect("削除するパターンを選択:", options=n_ok_sorted, key="ms_ngram_ok_fallback")
+                        selected_n_ok_pills = st.multiselect("解除するパターンを選択:", options=disp_ok_list, key="ms_ngram_ok_fallback")
 
                     if st.button("選択パターンを OK ルールから解除", key="btn_del_n_ok_pills", type="primary", use_container_width=True):
                         if selected_n_ok_pills:
                             ngram_ok.difference_update(selected_n_ok_pills)
+                            save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok)
+                            safe_save_json(save_dict, ngram_rules_path)
                             st.session_state["ngram_view_ver"] += 1
                             st.success(f"{len(selected_n_ok_pills)} 件のパターンを OK ルールから削除しました。")
                             st.rerun()
