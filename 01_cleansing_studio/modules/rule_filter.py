@@ -78,39 +78,6 @@ def extract_about_keywords_from_jsonl(input_jsonl_path: str) -> list:
     return counter.most_common()
 
 
-def extract_suffixes_from_jsonl(input_jsonl_path: str, max_suffix_len: int = 3) -> list:
-    """
-    raw_metadata.jsonl からタイトルの末尾語彙 (接尾辞: 〜譜, 〜本, 〜録など) を抽出・カウント集計し、
-    [(接尾辞, 出現件数), ...] の降順リストとして返します。
-    """
-    if not os.path.exists(input_jsonl_path):
-        return []
-
-    counter = Counter()
-
-    with open(input_jsonl_path, 'r', encoding='utf-8', errors='ignore') as f:
-        for line in f:
-            if not line.strip():
-                continue
-            try:
-                item = json.loads(line)
-                label_val = item.get("rdfs:label", item.get("schema:name", ""))
-                if isinstance(label_val, list) and label_val:
-                    label_str = str(label_val[0]).strip()
-                else:
-                    label_str = str(label_val).strip()
-
-                if label_str:
-                    clean_label = re.sub(r"[\s\(\)（）\[\]【】\d]+$", "", label_str)
-                    if clean_label:
-                        for l in range(1, max_suffix_len + 1):
-                            if len(clean_label) >= l:
-                                suf = clean_label[-l:]
-                                counter[suf] += 1
-            except Exception:
-                continue
-
-    return counter.most_common()
 
 
 def suggest_ng_keywords_with_llm(
@@ -461,63 +428,6 @@ def run_about_filter(input_jsonl_path: str, rules_json_path: str, output_filtere
     return passed_count, len(discarded_records)
 
 
-def run_suffix_filter(input_jsonl_path: str, rules_json_path: str, output_filtered_path: str, output_discarded_csv: str):
-    """末尾語彙（接尾辞）ルールに基づいてノイズタイトルを除外"""
-    if not os.path.exists(input_jsonl_path):
-        return 0, 0
-
-    suffix_rules = {}
-    if os.path.exists(rules_json_path):
-        with open(rules_json_path, 'r', encoding='utf-8') as f:
-            suffix_rules = json.load(f)
-
-    ng_suffixes = set([suf for suf, status in suffix_rules.items() if status == "NG"])
-
-    passed_count = 0
-    discarded_records = []
-
-    os.makedirs(os.path.dirname(output_filtered_path), exist_ok=True)
-    os.makedirs(os.path.dirname(output_discarded_csv), exist_ok=True)
-
-    with open(input_jsonl_path, 'r', encoding='utf-8', errors='ignore') as in_f, \
-         open(output_filtered_path, 'w', encoding='utf-8') as out_f:
-
-        for line in in_f:
-            if not line.strip():
-                continue
-            item = json.loads(line)
-            
-            label_val = item.get("rdfs:label", item.get("schema:name", ""))
-            if isinstance(label_val, list) and label_val:
-                label_str = str(label_val[0])
-            else:
-                label_str = str(label_val)
-
-            has_ng = False
-            matched_suffix = ""
-            for suf in ng_suffixes:
-                if label_str.endswith(suf):
-                    has_ng = True
-                    matched_suffix = suf
-                    break
-
-            if has_ng:
-                discarded_records.append({
-                    "id": item.get("@id", item.get("id", "")),
-                    "title": label_str,
-                    "matched_suffix": matched_suffix,
-                    "reason": f"接尾辞ルール除外: 末尾「{matched_suffix}」"
-                })
-            else:
-                out_f.write(json.dumps(item, ensure_ascii=False) + "\n")
-                passed_count += 1
-
-    if discarded_records:
-        import pandas as pd
-        df_disc = pd.DataFrame(discarded_records)
-        df_disc.to_csv(output_discarded_csv, index=False, encoding='utf-8-sig')
-
-    return passed_count, len(discarded_records)
 
 
 def split_dataset_by_rules(

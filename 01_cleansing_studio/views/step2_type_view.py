@@ -19,6 +19,7 @@ from modules.rule_filter import (
     save_type_rules,
     apply_type_filter
 )
+from modules.duckdb_manager import DuckDBManager
 
 
 def render_step2_type_view(paths: dict):
@@ -96,14 +97,35 @@ def render_step2_type_view(paths: dict):
                             current_ng.discard(t_lbl)
                     draft_types.clear()
 
-                    save_type_rules(type_rules_path, {"NG": current_ng, "OK": set()})
-                    tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
+                    def _execute_type_filter_with_provenance(target_ng):
+                        save_type_rules(type_rules_path, {"NG": target_ng, "OK": set()})
+                        tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
+                        duckdb_path = paths.get("PATH_DUCKDB", os.path.join(os.path.dirname(raw_path), "metadata_store.duckdb"))
+                        if os.path.exists(duckdb_path):
+                            try:
+                                db = DuckDBManager(db_path=duckdb_path)
+                                db.apply_type_filter_fast(list(target_ng))
+                                db.close()
+                            except Exception:
+                                pass
+                        return tot, pas, disc
+
+                    tot, pas, disc = _execute_type_filter_with_provenance(current_ng)
                     st.success(f"保存完了（残存: {pas:,} 件 / 除外: {disc:,} 件）")
                     st.cache_data.clear()
                     st.rerun()
             else:
                 if st.button("🔄 フィルタ再実行 (`type_filtered.jsonl` 更新)", use_container_width=True, key="btn_reapply_type_filter"):
+                    duckdb_path = paths.get("PATH_DUCKDB", os.path.join(os.path.dirname(raw_path), "metadata_store.duckdb"))
+                    save_type_rules(type_rules_path, {"NG": current_ng, "OK": set()})
                     tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
+                    if os.path.exists(duckdb_path):
+                        try:
+                            db = DuckDBManager(db_path=duckdb_path)
+                            db.apply_type_filter_fast(list(current_ng))
+                            db.close()
+                        except Exception:
+                            pass
                     st.success(f"更新完了（残存: {pas:,} 件 / 除外: {disc:,} 件）")
                     st.rerun()
 

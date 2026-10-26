@@ -14,6 +14,14 @@ from components.file_utils import count_lines
 from modules.rule_filter import split_dataset_by_rules
 from modules.llm_classifier import run_llm_semantic_classification, run_stage2_llm_classification
 
+try:
+    from modules.duckdb_manager import DuckDBManager
+except (ImportError, ValueError):
+    try:
+        from duckdb_manager import DuckDBManager
+    except ImportError:
+        DuckDBManager = None
+
 def render_step2c_view(paths: dict):
     """Step 3 画面の描画"""
     st.title("Step 3: LLMセマンティック適合判定 (判定保留群の分類)")
@@ -45,6 +53,30 @@ def render_step2c_view(paths: dict):
     has_split_files = os.path.exists(target_for_llm_path) and os.path.exists(confirmed_ok_path)
 
     def do_split():
+        duckdb_path = paths.get("PATH_DUCKDB", os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
+        if DuckDBManager and os.path.exists(duckdb_path):
+            try:
+                with st.spinner("DuckDB 高速エンジンでルール仕分けを実行中 (OK合格 / NG除外 / グレーゾーン)..."):
+                    db = DuckDBManager(db_path=duckdb_path)
+                    about_rules = {}
+                    if os.path.exists(about_rules_path):
+                        with open(about_rules_path, 'r', encoding='utf-8') as f:
+                            about_rules = json.load(f)
+                    ngram_rules = {}
+                    if os.path.exists(ngram_rules_path):
+                        with open(ngram_rules_path, 'r', encoding='utf-8') as f:
+                            ngram_rules = json.load(f)
+                    db.apply_rules_fast(about_rules, ngram_rules)
+                    ok_c, ng_c, grey_c = db.export_split_datasets(
+                        output_target_for_llm_jsonl=target_for_llm_path,
+                        output_confirmed_ok_jsonl=confirmed_ok_path,
+                        output_discarded_csv=discarded_rules_path
+                    )
+                    db.close()
+                    return ok_c, ng_c, grey_c
+            except Exception as e:
+                st.warning(f"DuckDB仕分けでエラーが発生したため、通常モードへフォールバックします: {e}")
+
         with st.spinner("ルールに基づいてデータを仕分け中 (OK合格 / NG除外 / グレーゾーン)..."):
             ok_c, ng_c, grey_c = split_dataset_by_rules(
                 input_jsonl_path=raw_input_path,
@@ -55,6 +87,7 @@ def render_step2c_view(paths: dict):
                 output_discarded_csv=discarded_rules_path
             )
             return ok_c, ng_c, grey_c
+
 
     # ファイル未生成時のみ初回実行
     if not has_split_files:

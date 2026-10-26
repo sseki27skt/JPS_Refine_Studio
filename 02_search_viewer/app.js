@@ -40,12 +40,32 @@ const elements = {
     modalDesc: document.getElementById('modal-item-description'),
     modalImage: document.getElementById('modal-item-image'),
     modalImgPlaceholder: document.getElementById('modal-image-placeholder'),
-    modalExternalLink: document.getElementById('link-external-source')
+    modalExternalLink: document.getElementById('link-external-source'),
+    modalProvenance: document.getElementById('modal-item-provenance'),
+
+    // Tabs & Views
+    tabBtnSearch: document.getElementById('tab-btn-search'),
+    tabBtnProvenance: document.getElementById('tab-btn-provenance'),
+    viewSearch: document.getElementById('view-search'),
+    viewProvenance: document.getElementById('view-provenance'),
+
+    // Provenance View Elements
+    provKeywords: document.getElementById('prov-keywords'),
+    provTargetNdc: document.getElementById('prov-target-ndc'),
+    provExcludeNdc: document.getElementById('prov-exclude-ndc'),
+    provRegex: document.getElementById('prov-regex'),
+    flowStatTotal: document.getElementById('flow-stat-total'),
+    flowStatTypeDisc: document.getElementById('flow-stat-type-disc'),
+    flowStatRuleDisc: document.getElementById('flow-stat-rule-disc'),
+    flowStatLlmDisc: document.getElementById('flow-stat-llm-disc'),
+    flowStatFinal: document.getElementById('flow-stat-final'),
+    containerTopDropReasons: document.getElementById('container-top-drop-reasons')
 };
 
 // Initialize Application
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
+    setupTabs();
     loadData();
     setupEventListeners();
 });
@@ -258,12 +278,26 @@ function renderCards() {
     elements.cardsGrid.innerHTML = '';
 
     if (state.filteredRecords.length === 0) {
-        elements.cardsGrid.innerHTML = `
-            <div style="grid-column: 1 / -1; text-align: center; padding: 4rem 1rem; color: var(--text-muted);">
-                <h3>該当する資料が見つかりませんでした</h3>
-                <p style="margin-top: 0.5rem;">検索キーワードやフィルタ条件を緩和してみてください。</p>
-            </div>
-        `;
+        if (state.allRecords.length === 0) {
+            elements.cardsGrid.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 4rem 1rem; color: var(--text-muted); background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed var(--border);">
+                    <div style="font-size: 2.5rem; margin-bottom: 1rem;">📦</div>
+                    <h3 style="color: var(--text-main); font-size: 1.25rem;">公開用データセットが未エクスポートです</h3>
+                    <p style="margin-top: 0.5rem; max-width: 500px; margin-left: auto; margin-right: auto; line-height: 1.6;">
+                        現在、表示可能な精緻化済み楽譜メタデータが存在しません。<br>
+                        <code>01_cleansing_studio</code> を起動し、Step 5 で <strong>「統合検索ポータル用データ出力」</strong> を実行するか、<br>
+                        <code>python3 02_search_viewer/build_viewer_data.py</code> を実行してデータを生成してください。
+                    </p>
+                </div>
+            `;
+        } else {
+            elements.cardsGrid.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; padding: 4rem 1rem; color: var(--text-muted);">
+                    <h3>該当する資料が見つかりませんでした</h3>
+                    <p style="margin-top: 0.5rem;">検索キーワードやフィルタ条件を緩和してみてください。</p>
+                </div>
+            `;
+        }
         return;
     }
 
@@ -275,11 +309,22 @@ function renderCards() {
         const card = document.createElement('div');
         card.className = 'item-card';
         
+        let provBadgeHtml = '';
+        if (item.provenance) {
+            const stageLabel = getStageLabel(item.provenance.stage);
+            provBadgeHtml = `
+                <div class="provenance-badge" title="${escapeHtml(item.provenance.reason || '')}">
+                    <span>🏷️ 採択: ${escapeHtml(stageLabel)}</span>
+                </div>
+            `;
+        }
+
         card.innerHTML = `
             <div>
                 <span class="card-tag">${escapeHtml(item.genre || '未分類')}</span>
                 <h3 class="card-title">${escapeHtml(item.title || '無題')}</h3>
                 <p class="card-description">${escapeHtml(item.description || '説明文なし')}</p>
+                ${provBadgeHtml}
             </div>
             <div class="card-meta">
                 <span>📍 ${escapeHtml(item.provider || '提供元情報なし')}</span>
@@ -405,12 +450,180 @@ function openModal(item) {
         elements.modalImgPlaceholder.classList.remove('hide');
     }
 
+    // Provenance Details in Modal
+    if (item.provenance) {
+        const stageLabel = getStageLabel(item.provenance.stage);
+        elements.modalProvenance.innerHTML = `
+            <div class="modal-provenance-box">
+                <div class="modal-prov-title">✅ 採択根拠（Provenance）: ${escapeHtml(stageLabel)}</div>
+                <div class="modal-prov-reason">${escapeHtml(item.provenance.reason || 'クレンジング採択基準を満たしています')}</div>
+                <div class="modal-prov-meta">判定ステージ: ${escapeHtml(item.provenance.stage || 'RULE')} ｜ 確信度: ${escapeHtml(item.provenance.confidence || 'HIGH')}</div>
+            </div>
+        `;
+        elements.modalProvenance.style.display = 'block';
+    } else {
+        elements.modalProvenance.style.display = 'none';
+    }
+
     elements.modalExternalLink.href = item.url || item.id || '#';
     elements.modal.classList.add('active');
 }
 
 function closeModal() {
     elements.modal.classList.remove('active');
+}
+
+// Stage Label Formatter
+function getStageLabel(stage) {
+    switch (stage) {
+        case 'RULE': return 'ルール判定 (About/N-gram)';
+        case 'TYPE': return '種別判定 (Type)';
+        case 'LLM': return 'LLMセマンティック推論';
+        case 'REVIEW': return '専門家査読 (Human Review)';
+        default: return stage || 'クレンジング通過';
+    }
+}
+
+// Navigation Tabs Switcher
+function setupTabs() {
+    if (!elements.tabBtnSearch || !elements.tabBtnProvenance) return;
+
+    elements.tabBtnSearch.addEventListener('click', () => {
+        elements.tabBtnSearch.classList.add('active');
+        elements.tabBtnProvenance.classList.remove('active');
+        elements.viewSearch.classList.remove('hide');
+        elements.viewProvenance.classList.add('hide');
+    });
+
+    elements.tabBtnProvenance.addEventListener('click', () => {
+        elements.tabBtnProvenance.classList.add('active');
+        elements.tabBtnSearch.classList.remove('active');
+        elements.viewProvenance.classList.remove('hide');
+        elements.viewSearch.classList.add('hide');
+        loadProvenanceData();
+    });
+}
+
+// Provenance Data Loader (PRISMA Flow & Manifest)
+let isProvenanceLoaded = false;
+async function loadProvenanceData() {
+    if (isProvenanceLoaded) return;
+
+    // 1. Try to load Acquisition Manifest
+    try {
+        const manifestRes = await fetch('../data/acquisition_manifest.json').catch(() => fetch('data/acquisition_manifest.json'));
+        if (manifestRes && manifestRes.ok) {
+            const manifest = await manifestRes.json();
+            const initCond = manifest.initial_condition || {};
+            
+            if (initCond.keywords && initCond.keywords.length > 0) {
+                elements.provKeywords.textContent = initCond.keywords.join(', ');
+            }
+            if (initCond.target_ndc && initCond.target_ndc.length > 0) {
+                elements.provTargetNdc.textContent = initCond.target_ndc.join(', ');
+            }
+            if (initCond.exclude_ndc && initCond.exclude_ndc.length > 0) {
+                elements.provExcludeNdc.textContent = initCond.exclude_ndc.join(', ');
+            }
+            if (initCond.regex_patterns && initCond.regex_patterns.length > 0) {
+                elements.provRegex.textContent = initCond.regex_patterns.join(' | ');
+            }
+        }
+    } catch (e) {
+        console.warn('Acquisition manifest loading error:', e);
+    }
+
+    // 2. Try to load PRISMA Flow Summary
+    try {
+        const prismaRes = await fetch('../data/prisma_flow_summary.json').catch(() => fetch('data/prisma_flow_summary.json'));
+        if (prismaRes && prismaRes.ok) {
+            const flow = await prismaRes.json();
+            const counts = flow.counts || flow || {};
+            
+            const total = counts.initial_pool ?? counts.total_records ?? 0;
+            const typeDisc = counts.type_excluded ?? counts.type_discarded ?? 0;
+            const ruleDisc = counts.rule_excluded ?? counts.rule_ng ?? 0;
+            const llmDisc = counts.llm_excluded ?? counts.llm_discarded ?? 0;
+            const finalAd = counts.final_adopted ?? 0;
+
+            if (elements.flowStatTotal) elements.flowStatTotal.textContent = `${total.toLocaleString()} 件`;
+            if (elements.flowStatTypeDisc) elements.flowStatTypeDisc.textContent = `Type除外: ${typeDisc.toLocaleString()} 件`;
+            if (elements.flowStatRuleDisc) elements.flowStatRuleDisc.textContent = `ルール除外: ${ruleDisc.toLocaleString()} 件`;
+            if (elements.flowStatLlmDisc) elements.flowStatLlmDisc.textContent = `LLM/保留除外: ${llmDisc.toLocaleString()} 件`;
+            if (elements.flowStatFinal) elements.flowStatFinal.textContent = `${finalAd.toLocaleString()} 件`;
+
+            // Render Exclusion Reasons Ranking
+            const topReasons = flow.top_drop_reasons || [];
+            if (elements.containerTopDropReasons) {
+                elements.containerTopDropReasons.innerHTML = '';
+                if (topReasons.length === 0) {
+                    elements.containerTopDropReasons.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem;">除外理由の集計データはありません。</div>';
+                } else {
+                    topReasons.forEach(r => {
+                        let reasonName = '';
+                        let reasonCnt = 0;
+                        let reasonRatio = '';
+
+                        if (Array.isArray(r)) {
+                            reasonName = r[0] || '除外理由';
+                            reasonCnt = r[1] || 0;
+                            const totalDisc = counts.final_discarded ?? (total - finalAd);
+                            reasonRatio = totalDisc > 0 ? `${((reasonCnt / totalDisc) * 100).toFixed(1)}%` : '0%';
+                        } else if (typeof r === 'object' && r !== null) {
+                            reasonName = r.reason || '除外理由';
+                            reasonCnt = r.count || 0;
+                            reasonRatio = r.ratio || '0%';
+                        }
+
+                        const card = document.createElement('div');
+                        card.className = 'reason-rank-card';
+                        card.innerHTML = `
+                            <div class="reason-rank-name" title="${escapeHtml(reasonName)}">${escapeHtml(reasonName)}</div>
+                            <span class="reason-rank-badge">${reasonCnt.toLocaleString()} 件 (${escapeHtml(reasonRatio)})</span>
+                        `;
+                        elements.containerTopDropReasons.appendChild(card);
+                    });
+                }
+            }
+            isProvenanceLoaded = true;
+        } else {
+            // Fallback rendering from current records
+            applyFallbackFlowStats();
+        }
+    } catch (e) {
+        console.warn('PRISMA flow summary loading error:', e);
+        applyFallbackFlowStats();
+    }
+}
+
+function applyFallbackFlowStats() {
+    const totalCount = state.allRecords.length;
+    if (elements.flowStatTotal) elements.flowStatTotal.textContent = `${totalCount.toLocaleString()} 件+`;
+    if (elements.flowStatFinal) elements.flowStatFinal.textContent = `${totalCount.toLocaleString()} 件`;
+    if (elements.flowStatTypeDisc) elements.flowStatTypeDisc.textContent = `Type除外: 算出中`;
+    if (elements.flowStatRuleDisc) elements.flowStatRuleDisc.textContent = `ルール除外: 算出中`;
+    if (elements.flowStatLlmDisc) elements.flowStatLlmDisc.textContent = `LLM除外: 算出中`;
+    
+    if (elements.containerTopDropReasons && elements.containerTopDropReasons.children.length === 0) {
+        elements.containerTopDropReasons.innerHTML = `
+            <div class="reason-rank-card">
+                <div class="reason-rank-name">非音楽資料（家譜・系図等）</div>
+                <span class="reason-rank-badge">NDC除外</span>
+            </div>
+            <div class="reason-rank-card">
+                <div class="reason-rank-name">美術資料（画譜等）</div>
+                <span class="reason-rank-badge">NDC除外</span>
+            </div>
+            <div class="reason-rank-card">
+                <div class="reason-rank-name">自然科学・技術系論文資料</div>
+                <span class="reason-rank-badge">NDC除外</span>
+            </div>
+            <div class="reason-rank-card">
+                <div class="reason-rank-name">画像・絵葉書（非書籍資料）</div>
+                <span class="reason-rank-badge">Type除外</span>
+            </div>
+        `;
+    }
 }
 
 function escapeHtml(str) {

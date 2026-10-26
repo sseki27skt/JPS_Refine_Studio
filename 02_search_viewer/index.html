@@ -28,83 +28,203 @@
         <p class="hero-subtitle" id="app-portal-subtitle">高精度にクレンジングされた文化資源メタデータのファセット検索・対話的分析ポータル</p>
     </header>
 
-    <!-- Analytics Dashboard Container -->
-    <div class="dashboard-container">
-        <div class="dashboard-card">
-            <div class="chart-wrapper">
-                <canvas id="categoryChart"></canvas>
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs-wrapper">
+        <div class="nav-tabs-container">
+            <button id="tab-btn-search" class="nav-tab active">
+                <span class="tab-icon">📚</span> 資料カタログ検索
+            </button>
+            <button id="tab-btn-provenance" class="nav-tab">
+                <span class="tab-icon">📊</span> 絞り込みプロセス ＆ 再現性（PRISMA）
+            </button>
+        </div>
+    </nav>
+
+    <!-- ===================================================================== -->
+    <!-- View 1: Catalog Search & Filter View                                  -->
+    <!-- ===================================================================== -->
+    <div id="view-search" class="app-view">
+        <!-- Analytics Dashboard Container -->
+        <div class="dashboard-container">
+            <div class="dashboard-card">
+                <div class="chart-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-match-count">0</div>
+                    <div class="stat-label">検索ヒット件数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-total-count">0</div>
+                    <div class="stat-label">総登録資料件数</div>
+                </div>
             </div>
-            <div class="stat-item">
-                <div class="stat-value" id="stat-match-count">0</div>
-                <div class="stat-label">検索ヒット件数</div>
+        </div>
+
+        <!-- Main Content Layout -->
+        <main class="main-layout">
+            <!-- Left Filter Sidebar -->
+            <aside class="filter-sidebar">
+                <div class="sidebar-card">
+                    <div class="search-input-box">
+                        <span class="search-icon-left">🔍</span>
+                        <input type="text" id="input-keyword-search" placeholder="タイトル、説明文、著者などから検索...">
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-group-title">カテゴリ / ジャンル</div>
+                        <div class="checkbox-list" id="container-genre-filters">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-group-title">所蔵元・提供機関</div>
+                        <div class="checkbox-list" id="container-provider-filters">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+
+                    <div class="filter-group">
+                        <div class="filter-group-title">属性 / 使用タグ</div>
+                        <div class="checkbox-list" id="container-attribute-filters">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+
+                    <button id="btn-reset-filters" class="btn-secondary">条件をクリア</button>
+                </div>
+            </aside>
+
+            <!-- Right Results Content Area -->
+            <section class="results-area">
+                <div class="results-header">
+                    <div class="results-count">
+                        該当資料: <strong id="lbl-match-count">0</strong> 件 / 全 <span id="lbl-total-count">0</span> 件
+                    </div>
+                    <div class="sort-select-wrapper">
+                        <select id="select-sort">
+                            <option value="title-asc">タイトル昇順 (A-Z / あ-ん)</option>
+                            <option value="title-desc">タイトル降順 (Z-A / ん-あ)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Card Grid Area -->
+                <div id="cards-grid" class="cards-grid">
+                    <!-- JSで動的にカードが挿入されます -->
+                </div>
+
+                <!-- Pagination Container -->
+                <div class="pagination-wrapper" id="container-pagination">
+                    <!-- 動的にページボタンが生成されます -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- View 2: Provenance & Methodology View (PRISMA Flow & Audit)           -->
+    <!-- ===================================================================== -->
+    <div id="view-provenance" class="app-view hide">
+        <div class="provenance-container">
+            <!-- Header Summary Card -->
+            <div class="provenance-hero-card">
+                <h2>📊 データセット構築レシピ ＆ 絞り込みプロセス</h2>
+                <p>学術研究の透明性と再現性（Reproducibility / Data Provenance）を担保するため、初期メタデータプールの同定条件および多段階クレンジングパイプラインの判定過程を公開しています。</p>
             </div>
-            <div class="stat-item">
-                <div class="stat-value" id="stat-total-count">0</div>
-                <div class="stat-label">総登録資料件数</div>
+
+            <!-- Provenance Grid Layout -->
+            <div class="provenance-grid">
+                <!-- Column 1: Initial Pool Manifest -->
+                <div class="provenance-card">
+                    <div class="card-section-title">⚙️ 初期母集団の抽出条件 (Acquisition Recipe)</div>
+                    <div class="manifest-detail-list">
+                        <div class="manifest-item">
+                            <span class="manifest-label">データ取得元</span>
+                            <span class="manifest-val">Japan Search SPARQL Endpoint</span>
+                        </div>
+                        <div class="manifest-item">
+                            <span class="manifest-label">検索キーワード群</span>
+                            <span class="manifest-val" id="prov-keywords">譜, 楽譜, 雅楽, 声明, 能楽, 謡本, 三味線, 尺八, 琵琶</span>
+                        </div>
+                        <div class="manifest-item">
+                            <span class="manifest-label">包含NDC分類</span>
+                            <span class="manifest-val" id="prov-target-ndc">768 (邦楽), 766 (劇音楽), 763 (楽器)</span>
+                        </div>
+                        <div class="manifest-item">
+                            <span class="manifest-label">除外NDC分類</span>
+                            <span class="manifest-val" id="prov-exclude-ndc">288 (系図・家譜), 720 (画譜), 400 (自然科学)</span>
+                        </div>
+                        <div class="manifest-item">
+                            <span class="manifest-label">正規表現ルール</span>
+                            <span class="manifest-val" id="prov-regex">.*(譜|楽|本).*</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Column 2: Stage Attrition Funnel -->
+                <div class="provenance-card">
+                    <div class="card-section-title">🔄 系統的レビュー（PRISMA準拠）脱落フロー</div>
+                    <div class="prisma-flow-diagram">
+                        <div class="prisma-step-box step-init">
+                            <div class="prisma-step-num">Step 1: 初期同定 (SPARQL)</div>
+                            <div class="prisma-step-count" id="flow-stat-total">-- 件</div>
+                            <div class="prisma-step-desc">Japan Search 全域より収集した候補母集団</div>
+                        </div>
+                        <div class="prisma-arrow">↓ <span class="arrow-discard" id="flow-stat-type-disc">Type除外: -- 件</span></div>
+                        <div class="prisma-step-box step-type">
+                            <div class="prisma-step-num">Step 2-A: データ種別除外</div>
+                            <div class="prisma-step-desc">記事・公演・絵画・絵葉書等の非書籍型資料を除外</div>
+                        </div>
+                        <div class="prisma-arrow">↓ <span class="arrow-discard" id="flow-stat-rule-disc">ルール除外: -- 件</span></div>
+                        <div class="prisma-step-box step-rule">
+                            <div class="prisma-step-num">Step 2-B/C: ルール判定 (About & N-gram)</div>
+                            <div class="prisma-step-desc">NDC主題分類 ＆ タイトル頻出語による高精度判定（家譜・画譜等の排除）</div>
+                        </div>
+                        <div class="prisma-arrow">↓ <span class="arrow-discard" id="flow-stat-llm-disc">LLM除外: -- 件</span></div>
+                        <div class="prisma-step-box step-llm">
+                            <div class="prisma-step-num">Step 3 & 4: LLMセマンティック推論 ＆ 専門家査読</div>
+                            <div class="prisma-step-desc">判定保留（グレーゾーン）の解題推論 ＆ 人間による手動オーバーライド</div>
+                        </div>
+                        <div class="prisma-arrow">↓</div>
+                        <div class="prisma-step-box step-final">
+                            <div class="prisma-step-num">🎉 最終採択データセット (Included)</div>
+                            <div class="prisma-step-count" id="flow-stat-final">-- 件</div>
+                            <div class="prisma-step-desc">精緻化済み真正楽譜資料メタデータ</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Exclusion Reasons Section -->
+            <div class="provenance-card" style="margin-top: 1.5rem;">
+                <div class="card-section-title">🚫 主な除外理由（非音楽資料の系統的排除内訳）</div>
+                <div class="exclusion-reasons-grid" id="container-top-drop-reasons">
+                    <!-- JSで動的に除外理由ランキングカードを挿入 -->
+                </div>
+            </div>
+
+            <!-- Provenance Package Download Section -->
+            <div class="provenance-card download-card" style="margin-top: 1.5rem;">
+                <div class="card-section-title">📥 再現性・監査（Audit Trail）データの入手</div>
+                <p style="color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 1.25rem;">
+                    本データセットの学術的検証・論文引用のために、初期母集団全件の採否判定理由が記録された完全追跡データ（Audit Trail CSV）および構築レシピ（JSON）を利用できます。
+                </p>
+                <div class="download-btn-group">
+                    <a id="btn-dl-audit-trail" href="../data/complete_audit_trail.csv" download="complete_audit_trail.csv" class="btn-primary" style="text-decoration: none;">
+                        📋 完全来歴追跡データ (complete_audit_trail.csv)
+                    </a>
+                    <a id="btn-dl-manifest" href="../data/acquisition_manifest.json" download="acquisition_manifest.json" class="btn-secondary" style="text-decoration: none;">
+                        ⚙️ 取得レシピ (acquisition_manifest.json)
+                    </a>
+                    <a id="btn-dl-prisma-report" href="../data/prisma_flow_report.md" download="prisma_flow_report.md" class="btn-secondary" style="text-decoration: none;">
+                        📊 PRISMAレポート (prisma_flow_report.md)
+                    </a>
+                </div>
             </div>
         </div>
     </div>
-
-    <!-- Main Content Layout -->
-    <main class="main-layout">
-        <!-- Left Filter Sidebar -->
-        <aside class="filter-sidebar">
-            <div class="sidebar-card">
-                <div class="search-input-box">
-                    <span class="search-icon-left">🔍</span>
-                    <input type="text" id="input-keyword-search" placeholder="タイトル、説明文、著者などから検索...">
-                </div>
-
-                <div class="filter-group">
-                    <div class="filter-group-title">カテゴリ / ジャンル</div>
-                    <div class="checkbox-list" id="container-genre-filters">
-                        <!-- 動的に生成 -->
-                    </div>
-                </div>
-
-                <div class="filter-group">
-                    <div class="filter-group-title">所蔵元・提供機関</div>
-                    <div class="checkbox-list" id="container-provider-filters">
-                        <!-- 動的に生成 -->
-                    </div>
-                </div>
-
-                <div class="filter-group">
-                    <div class="filter-group-title">属性 / 使用タグ</div>
-                    <div class="checkbox-list" id="container-attribute-filters">
-                        <!-- 動的に生成 -->
-                    </div>
-                </div>
-
-                <button id="btn-reset-filters" class="btn-secondary">条件をクリア</button>
-            </div>
-        </aside>
-
-        <!-- Right Results Content Area -->
-        <section class="results-area">
-            <div class="results-header">
-                <div class="results-count">
-                    該当資料: <strong id="lbl-match-count">0</strong> 件 / 全 <span id="lbl-total-count">0</span> 件
-                </div>
-                <div class="sort-select-wrapper">
-                    <select id="select-sort">
-                        <option value="title-asc">タイトル昇順 (A-Z / あ-ん)</option>
-                        <option value="title-desc">タイトル降順 (Z-A / ん-あ)</option>
-                    </select>
-                </div>
-            </div>
-
-            <!-- Card Grid Area -->
-            <div id="cards-grid" class="cards-grid">
-                <!-- JSで動的にカードが挿入されます -->
-            </div>
-
-            <!-- Pagination Container -->
-            <div class="pagination-wrapper" id="container-pagination">
-                <!-- 動的にページボタンが生成されます -->
-            </div>
-        </section>
-    </main>
 
     <!-- Detail & IIIF Modal Overlay -->
     <div id="modal-detail" class="modal-overlay">
@@ -116,6 +236,11 @@
             <div class="modal-media-container" id="modal-media-wrapper">
                 <img id="modal-item-image" src="" alt="資料プレビュー" class="hide">
                 <div id="modal-image-placeholder" style="color: var(--text-muted);">画像なし / プレビュー未取得</div>
+            </div>
+
+            <!-- Provenance Badge in Modal -->
+            <div id="modal-item-provenance" class="modal-provenance-container" style="display: none; margin-bottom: 1.25rem;">
+                <!-- 動的に採択根拠ボックスが挿入されます -->
             </div>
 
             <div style="margin-bottom: 1.5rem;">

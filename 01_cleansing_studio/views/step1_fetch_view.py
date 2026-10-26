@@ -28,7 +28,9 @@ from modules.sparql_collector import (
     get_job_status,
     update_job_status,
     request_job_stop,
-    DEFAULT_STATUS_FILE
+    DEFAULT_STATUS_FILE,
+    get_acquisition_manifest,
+    save_acquisition_manifest
 )
 
 def _on_rebuild_regex():
@@ -757,4 +759,37 @@ def render_step1_view(paths: dict):
                 st.rerun()
     else:
         st.info("メタデータ取得実行後に、このセクションで全件の整合性チェックおよび欠損補完を実行できます。")
+
+    # =========================================================================
+    # 4. 初期メタデータプール取得マニフェスト（Provenance & Reproducibility）
+    # =========================================================================
+    manifest_path = paths.get('PATH_ACQUISITION_MANIFEST', os.path.join(os.path.dirname(paths['PATH_RAW_METADATA']), "acquisition_manifest.json"))
+    manifest = get_acquisition_manifest(manifest_path)
+    if manifest:
+        st.write("---")
+        with st.expander("📋 初期メタデータプール取得条件マニフェスト (Acquisition Provenance)", expanded=False):
+            st.caption("研究成果の再現性を担保するため、初期データ取得時に適用された全条件（SPARQLクエリ・キーワード・NDC・取得統計）が記録されています。")
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                st.markdown(f"**作成日時**: `{manifest.get('created_at', '不明')}`")
+                st.markdown(f"**エンドポイント**: `{manifest.get('endpoint', '不明')}`")
+                metrics = manifest.get('metrics', {})
+                st.markdown(f"**収集URI総数**: `{metrics.get('total_target_uris', 0):,}` 件")
+                if 'success_count' in metrics:
+                    st.markdown(f"**深層メタデータ取得成功数**: `{metrics.get('success_count', 0):,}` 件")
+            with col_m2:
+                params = manifest.get('parameters', {})
+                st.markdown(f"**検索キーワード**: {', '.join(params.get('keywords', [])) or '（なし）'}")
+                st.markdown(f"**包含NDC**: {', '.join(params.get('target_ndc', [])) or '（全域）'}")
+                st.markdown(f"**除外NDC**: {', '.join(params.get('exclude_ndc', [])) or '（なし）'}")
+                if params.get('title_regex'):
+                    st.markdown(f"**タイトル正規表現**: `{params.get('title_regex')}`")
+
+            st.write("---")
+            queries = manifest.get('sparql_queries', {})
+            if queries:
+                st.markdown("**実行されたSPARQLクエリ（再現用）**")
+                for q_name, q_code in queries.items():
+                    with st.expander(f"SPARQL: {q_name}", expanded=False):
+                        st.code(q_code, language="sparql")
 

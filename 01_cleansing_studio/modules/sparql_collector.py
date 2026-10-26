@@ -23,6 +23,37 @@ MAX_RETRIES = 5
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_STATUS_FILE = os.path.join(BASE_DIR, "data", "fetch_job_status.json")
+DEFAULT_MANIFEST_FILE = os.path.join(BASE_DIR, "data", "acquisition_manifest.json")
+
+def get_acquisition_manifest(manifest_file: str = None) -> dict:
+    """初期メタデータプール取得マニフェスト（検索条件・SPARQL・統計）を取得"""
+    if manifest_file is None:
+        manifest_file = DEFAULT_MANIFEST_FILE
+    if not os.path.exists(manifest_file):
+        return {}
+    try:
+        with open(manifest_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"Error loading acquisition manifest: {e}")
+        return {}
+
+
+def save_acquisition_manifest(manifest_data: dict, manifest_file: str = None) -> bool:
+    """初期メタデータプール取得マニフェストをファイルに安全にアトミック保存"""
+    if manifest_file is None:
+        manifest_file = DEFAULT_MANIFEST_FILE
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(manifest_file)), exist_ok=True)
+        tmp_file = f"{manifest_file}.tmp"
+        with open(tmp_file, 'w', encoding='utf-8') as f:
+            json.dump(manifest_data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, manifest_file)
+        logger.info(f"Acquisition manifest saved: {manifest_file}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving acquisition manifest: {e}")
+        return False
 
 PREFIX_MAP = {
     "http://schema.org/": "schema:",
@@ -639,7 +670,8 @@ def build_metadata_for_uris(
     min_batch_size: int = 5,
     max_batch_size: int = 30,
     status_file: str = None,
-    duckdb_manager=None
+    duckdb_manager=None,
+    manifest_file: str = None
 ) -> int:
     """
     収集したURIリストに対して、Japan Search SPARQLからCONSTRUCT深層グラフメタデータを
@@ -793,6 +825,19 @@ def build_metadata_for_uris(
         print("\n--- [DuckDB 高速ストレージ同期フェーズ開始] ---")
         update_job_status(stage="duckdb_sync", status_file=status_file)
         duckdb_manager.import_jsonl(output_jsonl_path)
+
+    # マニフェストのメトリクス自動更新
+    try:
+        m_file = manifest_file or DEFAULT_MANIFEST_FILE
+        manifest = get_acquisition_manifest(m_file)
+        if manifest:
+            metrics = manifest.get("metrics", {})
+            metrics["success_count"] = total_count
+            metrics["completed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            manifest["metrics"] = metrics
+            save_acquisition_manifest(manifest, m_file)
+    except Exception as e:
+        logger.warning(f"マニフェストメトリクス自動更新スキップ: {e}")
 
     # 最終完了通知
     update_job_status(

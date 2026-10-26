@@ -546,3 +546,335 @@ body {
 .hide {
   display: none !important;
 }
+
+/* ==========================================================================
+   Navigation Tabs Section
+   ========================================================================== */
+.nav-tabs-wrapper {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.75rem 2rem;
+  display: flex;
+  justify-content: center;
+}
+
+.nav-tabs-container {
+  display: flex;
+  gap: 1rem;
+  max-width: 1400px;
+  width: 100%;
+}
+
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.nav-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+.nav-tab.active {
+  color: #fff;
+  background: var(--accent-gradient);
+  box-shadow: var(--shadow-sm), var(--accent-glow);
+}
+
+/* ==========================================================================
+   Provenance Badges (Cards & Modal)
+   ========================================================================== */
+.provenance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: var(--radius-sm);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modal-provenance-box {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+}
+
+.modal-prov-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #10b981;
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.modal-prov-reason {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.4rem;
+}
+
+.modal-prov-meta {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   Provenance & Methodology View Styles
+   ========================================================================== */
+.provenance-container {
+  max-width: 1400px;
+  margin: 2rem auto;
+  padding: 0 2rem 4rem;
+}
+
+.provenance-hero-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 2rem 2.5rem;
+  margin-bottom: 2rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.provenance-hero-card h2 {
+  font-size: 1.8rem;
+  font-weight: 800;
+  margin-bottom: 0.75rem;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.provenance-hero-card p {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.provenance-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .provenance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.provenance-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.card-section-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.75rem;
+}
+
+.manifest-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manifest-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.manifest-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.manifest-val {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  word-break: break-all;
+}
+
+/* PRISMA Step Diagram */
+.prisma-flow-diagram {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.prisma-step-box {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.4rem;
+  transition: all var(--transition-fast);
+}
+
+.prisma-step-box:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-2px);
+}
+
+.prisma-step-box.step-init {
+  border-left: 4px solid var(--accent-primary);
+}
+
+.prisma-step-box.step-type {
+  border-left: 4px solid #f59e0b;
+}
+
+.prisma-step-box.step-rule {
+  border-left: 4px solid #8b5cf6;
+}
+
+.prisma-step-box.step-llm {
+  border-left: 4px solid #ec4899;
+}
+
+.prisma-step-box.step-final {
+  border-left: 4px solid #10b981;
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.prisma-step-num {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.prisma-step-count {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin: 0.2rem 0;
+}
+
+.prisma-step-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.prisma-arrow {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.arrow-discard {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  padding: 0.15rem 0.5rem;
+  border-radius: 20px;
+}
+
+/* Exclusion Reasons Grid */
+.exclusion-reasons-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.reason-rank-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1.1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reason-rank-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 75%;
+}
+
+.reason-rank-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+}
+
+/* Download Action Buttons */
+.download-btn-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent-gradient);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-fast);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg), var(--accent-glow);
+}

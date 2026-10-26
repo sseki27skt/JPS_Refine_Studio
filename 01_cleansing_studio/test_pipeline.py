@@ -18,7 +18,9 @@ from sparql_collector import (
     get_job_status,
     update_job_status,
     request_job_stop,
-    is_process_alive
+    is_process_alive,
+    save_acquisition_manifest,
+    get_acquisition_manifest
 )
 from rule_filter import (
     suggest_ng_keywords_with_llm,
@@ -441,6 +443,256 @@ def test_sparql_fetch_and_job_status():
             sparql_collector.fetch_deep_graph_with_stats = orig_fetch
 
 
+def test_provenance_and_audit():
+    print("\n=== [Test 10] Provenance & Audit Trail Integration Test ===")
+    from duckdb_manager import DuckDBManager
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # 1. マニフェスト保存・読み込みテスト
+        manifest_file = os.path.join(tmpdir, "test_manifest.json")
+        sample_manifest = {
+            "dataset_name": "Test Classical Scores",
+            "created_at": "2026-10-26 10:00:00",
+            "endpoint": "https://jpsearch.go.jp/rdf/sparql/",
+            "parameters": {
+                "keywords": ["譜", "雅楽"],
+                "target_ndc": ["768"],
+                "exclude_ndc": ["288"]
+            },
+            "sparql_queries": {
+                "Part 1": "SELECT ?s WHERE { ?s ?p ?o } LIMIT 10"
+            },
+            "metrics": {
+                "total_target_uris": 4,
+                "success_count": 4
+            }
+        }
+        ok_save = save_acquisition_manifest(sample_manifest, manifest_file)
+        assert ok_save is True
+        loaded_m = get_acquisition_manifest(manifest_file)
+        assert loaded_m["dataset_name"] == "Test Classical Scores"
+        assert loaded_m["parameters"]["keywords"] == ["譜", "雅楽"]
+        print(f"[OK] Acquisition manifest save & load verified.")
+
+        # 2. DuckDB 来歴記録・Type除外・ルール適用テスト
+        jsonl_path = os.path.join(tmpdir, "audit_sample.jsonl")
+        audit_records = [
+            {"@id": "http://example.org/rec1", "rdfs:label": "古譜 雅楽集成", "rdf:type": ["http://schema.org/Book"], "schema:about": ["ndc#768.1", "雅楽"]},
+            {"@id": "http://example.org/rec2", "rdfs:label": "徳川家 諸家系譜", "rdf:type": ["http://schema.org/Book"], "schema:about": ["ndc#288", "系譜"]},
+            {"@id": "http://example.org/rec3", "rdfs:label": "音楽学論考 論文", "rdf:type": ["http://schema.org/Article"], "schema:about": ["音楽"]},
+            {"@id": "http://example.org/rec4", "rdfs:label": "未詳古記", "rdf:type": ["http://schema.org/Book"], "schema:about": []}
+        ]
+        with open(jsonl_path, 'w', encoding='utf-8') as f:
+            for r in audit_records:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+        db = DuckDBManager(":memory:")
+        db.import_jsonl(jsonl_path)
+        assert db.get_record_count() == 4
+
+        # A. Typeフィルタ除外 (Articleを除外)
+        type_res = db.apply_type_filter_fast(["Article", "論文"])
+        assert type_res["discarded"] == 1
+        assert type_res["passed"] == 3
+        print(f"[OK] Type filter fast & provenance record verified: {type_res}")
+
+        # B. About & Ngram ルール適用
+        about_rules = {"288": "NG", "系譜": "NG", "768.1": "OK"}
+        ngram_rules = {"雅楽": "OK"}
+        rule_res = db.apply_rules_fast(about_rules, ngram_rules)
+        print(f"[OK] Rule filter fast & provenance record verified: {rule_res}")
+
+        # C. PRISMA 集計テスト
+        prisma_stats = db.get_prisma_flow_stats()
+        assert prisma_stats["total_records"] == 4
+        assert prisma_stats["type_discarded"] == 1
+        assert prisma_stats["rule_ok"] >= 1
+        assert len(prisma_stats["top_drop_reasons"]) > 0
+        print(f"[OK] PRISMA flow statistics verified: OK={prisma_stats['rule_ok']}, Disc={prisma_stats['final_discarded']}")
+
+        # D. 完全来歴追跡 (Complete Audit Trail) CSV エクスポートテスト
+        csv_path = os.path.join(tmpdir, "complete_audit_trail.csv")
+        exported_csv_cnt = db.export_complete_audit_trail_csv(csv_path)
+        assert exported_csv_cnt == 4
+        assert os.path.exists(csv_path)
+
+        # CSV内容検証
+        import pandas as pd
+        df_audit = pd.read_csv(csv_path)
+        assert len(df_audit) == 4
+        assert "final_outcome" in df_audit.columns
+        assert "decision_stage" in df_audit.columns
+        assert "decision_reason" in df_audit.columns
+
+        # rec1は合格(ADOPTED), rec2とrec3は除外(DISCARDED)
+        rec1_row = df_audit[df_audit['id'] == "http://example.org/rec1"].iloc[0]
+        assert rec1_row["final_outcome"] == "ADOPTED"
+        assert "RULE" in rec1_row["decision_stage"]
+
+        rec3_row = df_audit[df_audit['id'] == "http://example.org/rec3"].iloc[0]
+        assert rec3_row["final_outcome"] == "DISCARDED"
+        assert rec3_row["decision_stage"] == "TYPE"
+        print(f"[OK] Complete Audit Trail CSV exported and verified with all 4 records.")
+
+        db.close()
+
+
+def test_workspace_and_snapshot_management():
+    print("\n=== [Test 10] Workspace and Snapshot Management Test ===")
+    from workspace_manager import WorkspaceManager
+    import duckdb
+
+    with tempfile.TemporaryDirectory() as tmp_root:
+        # 1. ワークスペースマネージャーの初期化
+        wm = WorkspaceManager(project_root=tmp_root)
+        workspaces = wm.list_workspaces()
+        assert len(workspaces) == 1
+        assert workspaces[0]["id"] == wm.DEFAULT_WORKSPACE_ID
+        print(f"[OK] WorkspaceManager initialized with default workspace: {workspaces[0]['id']}")
+
+        # 2. 新規ワークスペースの作成
+        ws_ukiyoe = wm.create_workspace("ukiyoe_test", "浮世絵テストコレクション", "浮世絵研究用ワークスペース")
+        assert ws_ukiyoe["id"] == "ukiyoe_test"
+        all_ws = wm.list_workspaces()
+        assert len(all_ws) == 2
+        print(f"[OK] New workspace created: {ws_ukiyoe['id']} ({ws_ukiyoe['name']})")
+
+        # 3. パス生成の検証
+        paths_uk = wm.get_workspace_paths("ukiyoe_test")
+        assert "ukiyoe_test" in paths_uk["PATH_RAW_METADATA"]
+        assert "ukiyoe_test" in paths_uk["PATH_DUCKDB"]
+        print(f"[OK] Dynamic paths correctly resolved for ukiyoe_test.")
+
+        # 4. DuckDB とダミーデータを用いたスナップショット保存・復元テスト
+        db_path = paths_uk["PATH_DUCKDB"]
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        con = duckdb.connect(db_path)
+        con.execute("""
+            CREATE TABLE metadata_records (
+                id VARCHAR PRIMARY KEY,
+                title VARCHAR,
+                description VARCHAR,
+                about_list VARCHAR[],
+                type_list VARCHAR[],
+                raw_json VARCHAR,
+                type_status VARCHAR DEFAULT NULL,
+                type_reason VARCHAR DEFAULT NULL,
+                about_status VARCHAR DEFAULT NULL,
+                about_reason VARCHAR DEFAULT NULL,
+                ngram_status VARCHAR DEFAULT NULL,
+                ngram_reason VARCHAR DEFAULT NULL,
+                llm_status VARCHAR DEFAULT NULL,
+                llm_reason VARCHAR DEFAULT NULL,
+                final_decision VARCHAR DEFAULT 'GREY',
+                human_decision VARCHAR DEFAULT NULL,
+                review_reasons VARCHAR DEFAULT NULL,
+                llm_evaluated BOOLEAN DEFAULT FALSE,
+                adopted_stage VARCHAR DEFAULT NULL,
+                drop_stage VARCHAR DEFAULT NULL,
+                primary_reason VARCHAR DEFAULT NULL
+            );
+        """)
+        # レコード挿入
+        con.execute("""
+            INSERT INTO metadata_records (id, title, final_decision, type_status) VALUES
+            ('http://ex.org/1', '富嶽三十六景', 'OK', 'PASSED'),
+            ('http://ex.org/2', '東海道五十三次', 'NG', 'EXCLUDED');
+        """)
+        con.close()
+
+        # スナップショット保存
+        snap1 = wm.save_snapshot("ukiyoe_test", "スナップショット1", "初期登録状態")
+        assert snap1["metrics"]["total"] == 2
+        assert snap1["metrics"]["adopted"] == 1
+        assert snap1["metrics"]["discarded"] == 1
+        print(f"[OK] Snapshot saved successfully: {snap1['id']} (Metrics: {snap1['metrics']})")
+
+        # DuckDB の判定ステータスを変更
+        con = duckdb.connect(db_path)
+        con.execute("UPDATE metadata_records SET final_decision = 'GREY';")
+        chk = con.execute("SELECT count(*) FROM metadata_records WHERE final_decision = 'OK';").fetchone()[0]
+        assert chk == 0
+        con.close()
+
+        # スナップショット復元
+        res = wm.restore_snapshot("ukiyoe_test", snap1["id"])
+        assert res is True
+        con = duckdb.connect(db_path)
+        chk_restored = con.execute("SELECT count(*) FROM metadata_records WHERE final_decision = 'OK';").fetchone()[0]
+        assert chk_restored == 1
+        con.close()
+        print(f"[OK] Snapshot restored successfully! Decisions rolled back in DuckDB.")
+
+        # 5. ZIP エクスポート & インポート
+        zip_out = os.path.join(tmp_root, "test_export.zip")
+        wm.export_package("ukiyoe_test", zip_out, export_type="recipe")
+        assert os.path.exists(zip_out)
+        print(f"[OK] Recipe bundle exported: {os.path.getsize(zip_out)} bytes")
+
+        imported_ws = wm.import_package(zip_out, new_ws_id="imported_study", new_name="引き継ぎデータセット")
+        assert imported_ws["id"] == "imported_study"
+        assert len(wm.list_workspaces()) == 3
+        print(f"[OK] Recipe bundle imported successfully as new workspace: {imported_ws['id']}")
+
+        # 6. 削除
+        wm.delete_workspace("imported_study")
+        wm.delete_workspace("ukiyoe_test")
+        assert len(wm.list_workspaces()) == 1
+        print(f"[OK] Workspace deletion verified. Default workspace remains protected.")
+
+
+def test_clean_environment_and_duckdb_split():
+    print("\n=== [Test 11] Clean Environment & DuckDB Split Optimization Test ===")
+    from duckdb_manager import DuckDBManager
+    from workspace_manager import WorkspaceManager
+
+    # 1. ワークスペースの初期状態パス解決テスト
+    wm = WorkspaceManager()
+    paths = wm.get_workspace_paths("gagaku_default")
+    assert "PATH_DUCKDB" in paths
+    assert "PATH_RAW_METADATA" in paths
+    print(f"[OK] Workspace paths safely resolved in clean state: {paths['DIR_WORKSPACE']}")
+
+    # 2. DuckDB 高速仕分けエクスポートの単体検証
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_db_path = os.path.join(tmpdir, "test.duckdb")
+        db = DuckDBManager(test_db_path)
+
+        # テストデータのインポート
+        sample_jsonl = os.path.join(tmpdir, "sample.jsonl")
+        test_items = [
+            {"@id": "http://example.org/1", "rdfs:label": "新選楽譜集 雅楽篇", "schema:about": ["雅楽", "ndc#768"], "rdf:type": ["schema:Book"]},
+            {"@id": "http://example.org/2", "rdfs:label": "徳川家系譜図", "schema:about": ["系譜", "歴史"], "rdf:type": ["schema:Book"]},
+            {"@id": "http://example.org/3", "rdfs:label": "謡曲選集 観世流", "schema:about": ["能楽"], "rdf:type": ["schema:Book"]},
+            {"@id": "http://example.org/4", "rdfs:label": "山梨郡誌 笛吹村", "schema:about": ["地理"], "rdf:type": ["schema:Book"]}
+        ]
+        with open(sample_jsonl, 'w', encoding='utf-8') as f:
+            for item in test_items:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+        imported = db.import_jsonl(sample_jsonl)
+        assert imported == 4
+
+        # ルール適用
+        about_rules = {"雅楽": "OK", "系譜": "NG"}
+        ngram_rules = {"楽譜": "OK", "郡誌": "NG"}
+        summary = db.apply_rules_fast(about_rules, ngram_rules)
+        assert summary["total"] == 4
+        assert summary["ok"] >= 1
+        assert summary["ng"] >= 1
+
+        # 高速3分割エクスポート
+        out_llm = os.path.join(tmpdir, "target_llm.jsonl")
+        out_ok = os.path.join(tmpdir, "confirmed_ok.jsonl")
+        out_disc = os.path.join(tmpdir, "discarded.csv")
+        ok_c, ng_c, grey_c = db.export_split_datasets(out_llm, out_ok, out_disc)
+        assert ok_c + ng_c + grey_c == 4
+        assert os.path.exists(out_ok)
+        assert os.path.exists(out_disc)
+        db.close()
+        print(f"[OK] DuckDB apply_rules_fast & export_split_datasets verified: OK={ok_c}, NG={ng_c}, Grey={grey_c}")
+
+
 if __name__ == "__main__":
     print("--------------------------------------------------")
     print("  Japan Search Enhanced Pipeline & Module Unit Tests")
@@ -455,6 +707,9 @@ if __name__ == "__main__":
         test_symbol_cleaning_and_multithreaded_classifier()
         test_duckdb_engine()
         test_sparql_fetch_and_job_status()
+        test_provenance_and_audit()
+        test_workspace_and_snapshot_management()
+        test_clean_environment_and_duckdb_split()
         print("\n==================================================")
         print(" SUCCESS: All enhanced pipeline & module tests passed!")
         print("==================================================")
@@ -463,5 +718,6 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
 
 

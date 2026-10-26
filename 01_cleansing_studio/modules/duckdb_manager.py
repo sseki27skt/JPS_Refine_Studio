@@ -55,17 +55,36 @@ class DuckDBManager:
                 external_info VARCHAR DEFAULT NULL,
                 human_decision VARCHAR DEFAULT NULL,
                 review_reasons VARCHAR DEFAULT NULL,
-                llm_evaluated BOOLEAN DEFAULT FALSE
+                llm_evaluated BOOLEAN DEFAULT FALSE,
+                type_reason VARCHAR DEFAULT NULL,
+                about_reason VARCHAR DEFAULT NULL,
+                ngram_reason VARCHAR DEFAULT NULL,
+                adopted_stage VARCHAR DEFAULT NULL,
+                drop_stage VARCHAR DEFAULT NULL,
+                primary_reason VARCHAR DEFAULT NULL
             );
         """)
         # 既存DBファイルに対するスキーママイグレーション
-        try:
-            self.conn.execute("ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS llm_evaluated BOOLEAN DEFAULT FALSE;")
-        except Exception:
-            pass
+        migration_columns = [
+            ("llm_evaluated", "BOOLEAN DEFAULT FALSE"),
+            ("type_reason", "VARCHAR DEFAULT NULL"),
+            ("about_reason", "VARCHAR DEFAULT NULL"),
+            ("ngram_reason", "VARCHAR DEFAULT NULL"),
+            ("adopted_stage", "VARCHAR DEFAULT NULL"),
+            ("drop_stage", "VARCHAR DEFAULT NULL"),
+            ("primary_reason", "VARCHAR DEFAULT NULL")
+        ]
+        for col_name, col_type in migration_columns:
+            try:
+                self.conn.execute(f"ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+            except Exception:
+                pass
+
         # インデックス作成（存在しない場合）
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_records_decision ON metadata_records(final_decision);")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_records_human ON metadata_records(human_decision);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_records_drop ON metadata_records(drop_stage);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_records_adopted ON metadata_records(adopted_stage);")
 
     def clear(self):
         """全レコードを削除"""
@@ -200,8 +219,11 @@ class DuckDBManager:
         re_ng_ngram = re.compile("|".join(map(re.escape, sorted(ng_ngrams, key=len, reverse=True)))) if ng_ngrams else None
         re_ok_ngram = re.compile("|".join(map(re.escape, sorted(ok_ngrams, key=len, reverse=True)))) if ok_ngrams else None
 
-        # DuckDBから全件の id, title, about_list を一括フェッチ
-        records = self.conn.execute("SELECT id, title, about_list FROM metadata_records;").fetchall()
+        # DuckDBから全件の id, title, about_list, type_status, drop_stage, primary_reason を一括フェッチ
+        records = self.conn.execute("""
+            SELECT id, title, about_list, type_status, drop_stage, primary_reason 
+            FROM metadata_records;
+        """).fetchall()
 
         updates = []
         ok_count = 0
@@ -224,19 +246,42 @@ class DuckDBManager:
             return False, ""
 
         for row in records:
-            item_id, title, about_list = row[0], row[1] or "", row[2] or []
+            item_id = row[0]
+            title = row[1] or ""
+            about_list = row[2] or []
+            type_status = row[3]
+            existing_drop_stage = row[4]
+            existing_primary_reason = row[5]
+
+            # 既に Type除外されているレコードは、除外状態と来歴を保護
+            if type_status == 'NG':
+                updates.append((
+                    item_id, "NG", existing_primary_reason or "Type除外",
+                    None, None,
+                    None, None,
+                    None, existing_drop_stage or "TYPE", existing_primary_reason or "Type除外"
+                ))
+                ng_count += 1
+                continue
 
             # =================================================================
             # 1. NG判定（最優先）
             # =================================================================
             has_ng = False
             matched_reason = ""
+            about_status, about_reason = None, None
+            ngram_status, ngram_reason = None, None
+            drop_stage = None
+            adopted_stage = None
 
             # A. About NG 判定 (match_about_keyword 互換 + キャッシュ)
             is_about_ng, matched_r = check_about_match(about_list, ng_about_rules)
             if is_about_ng:
                 has_ng = True
                 matched_reason = f"About NG: 「{matched_r}」"
+                about_status = "NG"
+                about_reason = matched_r
+                drop_stage = "RULE_ABOUT"
 
             # B. タイトル N-gram NG 判定（高速正規表現オートマトン）
             if not has_ng and re_ng_ngram:
@@ -244,9 +289,17 @@ class DuckDBManager:
                 if m:
                     has_ng = True
                     matched_reason = f"タイトル NG: 「{m.group(0)}」"
+                    ngram_status = "NG"
+                    ngram_reason = m.group(0)
+                    drop_stage = "RULE_NGRAM"
 
             if has_ng:
-                updates.append((item_id, "NG", matched_reason))
+                updates.append((
+                    item_id, "NG", matched_reason, 
+                    about_status, about_reason, 
+                    ngram_status, ngram_reason, 
+                    None, drop_stage, matched_reason
+                ))
                 ng_count += 1
                 continue
 
@@ -260,27 +313,64 @@ class DuckDBManager:
             if is_about_ok:
                 has_ok = True
                 matched_ok_reason = f"About OK: 「{matched_ok_r}」"
+                about_status = "OK"
+                about_reason = matched_ok_r
+                adopted_stage = "RULE_ABOUT"
 
             if not has_ok and re_ok_ngram:
                 m = re_ok_ngram.search(title)
                 if m:
                     has_ok = True
                     matched_ok_reason = f"タイトル OK: 「{m.group(0)}」"
+                    ngram_status = "OK"
+                    ngram_reason = m.group(0)
+                    adopted_stage = "RULE_NGRAM"
 
             if has_ok:
-                updates.append((item_id, "OK", f"[ルール合格] {matched_ok_reason}"))
+                full_ok_reason = f"[ルール合格] {matched_ok_reason}"
+                updates.append((
+                    item_id, "OK", full_ok_reason,
+                    about_status, about_reason,
+                    ngram_status, ngram_reason,
+                    adopted_stage, None, full_ok_reason
+                ))
                 ok_count += 1
             else:
-                updates.append((item_id, "GREY", "判定保留 (LLMセマンティック対象)"))
+                updates.append((
+                    item_id, "GREY", "判定保留 (LLMセマンティック対象)",
+                    None, None,
+                    None, None,
+                    None, None, "判定保留 (LLMセマンティック対象)"
+                ))
                 grey_count += 1
 
         # 一括バルク更新 (一時テーブル経由で高速UPDATE)
-        self.conn.execute("CREATE TEMP TABLE temp_updates (id VARCHAR PRIMARY KEY, decision VARCHAR, reason VARCHAR);")
-        self.conn.executemany("INSERT INTO temp_updates VALUES (?, ?, ?);", updates)
+        self.conn.execute("""
+            CREATE TEMP TABLE temp_updates (
+                id VARCHAR PRIMARY KEY, 
+                decision VARCHAR, 
+                reason VARCHAR,
+                about_status VARCHAR,
+                about_reason VARCHAR,
+                ngram_status VARCHAR,
+                ngram_reason VARCHAR,
+                adopted_stage VARCHAR,
+                drop_stage VARCHAR,
+                primary_reason VARCHAR
+            );
+        """)
+        self.conn.executemany("INSERT INTO temp_updates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", updates)
         self.conn.execute("""
             UPDATE metadata_records
             SET final_decision = u.decision,
-                matched_reason = u.reason
+                matched_reason = u.reason,
+                about_status = u.about_status,
+                about_reason = u.about_reason,
+                ngram_status = u.ngram_status,
+                ngram_reason = u.ngram_reason,
+                adopted_stage = u.adopted_stage,
+                drop_stage = u.drop_stage,
+                primary_reason = u.primary_reason
             FROM temp_updates u
             WHERE metadata_records.id = u.id;
         """)
@@ -340,6 +430,7 @@ class DuckDBManager:
             FROM metadata_records WHERE final_decision = 'NG';
         """).fetchdf()
         ng_rows.to_csv(output_discarded_csv, index=False, encoding='utf-8-sig')
+        return len(ok_rows), len(ng_rows), len(grey_rows)
 
     # =========================================================================
     # Step 4: 専門家査読ポータル用 高速メソッド群
@@ -387,6 +478,18 @@ class DuckDBManager:
                 llm_reason = t.llm_reason,
                 external_info = t.external_info,
                 llm_evaluated = true,
+                llm_status = CASE 
+                    WHEN t.llm_target = true THEN 'PASS'
+                    WHEN t.llm_target = false THEN 'FAIL'
+                    ELSE 'UNKNOWN'
+                END,
+                adopted_stage = CASE WHEN t.llm_target = true THEN 'LLM' ELSE adopted_stage END,
+                drop_stage = CASE WHEN t.llm_target = false AND (type_status IS NULL OR type_status != 'NG') THEN 'LLM' ELSE drop_stage END,
+                primary_reason = CASE
+                    WHEN t.llm_target = true THEN '[LLM判定] ' || coalesce(t.llm_reason, '')
+                    WHEN t.llm_target = false AND (type_status IS NULL OR type_status != 'NG') THEN '[LLM除外] ' || coalesce(t.llm_reason, '')
+                    ELSE primary_reason
+                END,
                 final_decision = CASE
                     WHEN t.llm_target = true THEN 'OK'
                     WHEN t.llm_target = false THEN 'NG'
@@ -512,9 +615,15 @@ class DuckDBManager:
         """1件の判定手動オーバーライドを即時更新"""
         self.conn.execute("""
             UPDATE metadata_records
-            SET human_decision = ?
+            SET human_decision = ?,
+                adopted_stage = CASE WHEN ? = '合格' THEN 'HUMAN' ELSE adopted_stage END,
+                drop_stage = CASE WHEN ? = '除外' THEN 'HUMAN' ELSE drop_stage END,
+                primary_reason = CASE 
+                    WHEN ? = '合格' THEN '[査読合格] 専門家による手動承認' 
+                    ELSE '[査読除外] 専門家による手動除外' 
+                END
             WHERE id = ?;
-        """, (decision, item_id))
+        """, (decision, decision, decision, decision, item_id))
 
     def get_all_human_decisions(self) -> Dict[str, str]:
         """全レコードの手動上書き辞書を取得"""
@@ -586,6 +695,200 @@ class DuckDBManager:
         """)
         self.conn.execute("DROP TABLE temp_human_sync;")
         return len(updates)
+
+    def apply_type_filter_fast(self, ng_types: list) -> Dict[str, int]:
+        """
+        Type (rdf:type) のNGルールに基づいて除外判定を適用し、来歴を記録
+        """
+        if not ng_types:
+            total_c = self.get_record_count()
+            return {"total": total_c, "passed": total_c, "discarded": 0}
+
+        records = self.conn.execute("SELECT id, type_list FROM metadata_records;").fetchall()
+        ng_set = set(ng_types)
+        updates = []
+        disc_cnt = 0
+
+        for r in records:
+            uid, t_list = r[0], r[1] or []
+            matched_t = None
+            if not t_list:
+                if "（未定義 / 種別なし）" in ng_set:
+                    matched_t = "（未定義 / 種別なし）"
+            else:
+                for t in t_list:
+                    short_t = t.split("/")[-1].split("#")[-1]
+                    if t in ng_set or short_t in ng_set:
+                        matched_t = short_t or t
+                        break
+
+            if matched_t:
+                reason_str = f"Type除外: 「{matched_t}」"
+                updates.append((uid, "NG", reason_str, matched_t, "TYPE", reason_str))
+                disc_cnt += 1
+            else:
+                updates.append((uid, "PASS", None, None, None, None))
+
+        self.conn.execute("""
+            CREATE TEMP TABLE temp_type_updates (
+                id VARCHAR PRIMARY KEY,
+                t_status VARCHAR,
+                m_reason VARCHAR,
+                t_reason VARCHAR,
+                d_stage VARCHAR,
+                p_reason VARCHAR
+            );
+        """)
+        self.conn.executemany("INSERT INTO temp_type_updates VALUES (?, ?, ?, ?, ?, ?);", updates)
+        self.conn.execute("""
+            UPDATE metadata_records
+            SET type_status = u.t_status,
+                type_reason = u.t_reason,
+                drop_stage = CASE WHEN u.t_status = 'NG' THEN u.d_stage ELSE drop_stage END,
+                primary_reason = CASE WHEN u.t_status = 'NG' THEN u.p_reason ELSE primary_reason END,
+                final_decision = CASE WHEN u.t_status = 'NG' THEN 'NG' ELSE final_decision END,
+                matched_reason = CASE WHEN u.t_status = 'NG' THEN u.m_reason ELSE matched_reason END
+            FROM temp_type_updates u
+            WHERE metadata_records.id = u.id;
+        """)
+        self.conn.execute("DROP TABLE temp_type_updates;")
+
+        total = len(records)
+        return {"total": total, "passed": total - disc_cnt, "discarded": disc_cnt}
+
+    def export_complete_audit_trail_csv(self, output_csv_path: str) -> int:
+        """
+        初期母集団全件の完全来歴追跡データ (Complete Audit Trail) をCSVエクスポート
+        """
+        import pandas as pd
+        os.makedirs(os.path.dirname(os.path.abspath(output_csv_path)), exist_ok=True)
+        query = """
+            SELECT 
+                id,
+                title,
+                CASE 
+                    WHEN coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格' THEN 'ADOPTED'
+                    ELSE 'DISCARDED'
+                END AS final_outcome,
+                coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) AS final_verdict_ja,
+                coalesce(adopted_stage, drop_stage, CASE WHEN final_decision = 'OK' THEN 'RULE' ELSE 'RULE' END) AS decision_stage,
+                coalesce(review_reasons, primary_reason, matched_reason, '未判定') AS decision_reason,
+                type_status,
+                type_reason,
+                about_status,
+                about_reason,
+                ngram_status,
+                ngram_reason,
+                llm_status,
+                llm_reason,
+                external_info,
+                human_decision,
+                review_reasons
+            FROM metadata_records
+            ORDER BY id;
+        """
+        df = self.conn.execute(query).fetchdf()
+        df.to_csv(output_csv_path, index=False, encoding='utf-8-sig')
+        return len(df)
+
+    def get_prisma_flow_stats(self) -> Dict[str, Any]:
+        """
+        PRISMA声明準拠の段階別流出入メトリクスを集計
+        """
+        total = self.get_record_count()
+        if total == 0:
+            return {
+                "total_records": 0,
+                "type_discarded": 0,
+                "type_passed": 0,
+                "rule_ok": 0,
+                "rule_ng": 0,
+                "rule_grey": 0,
+                "llm_evaluated_total": 0,
+                "llm_passed": 0,
+                "llm_discarded": 0,
+                "human_override_count": 0,
+                "final_adopted": 0,
+                "final_discarded": 0,
+                "top_drop_reasons": []
+            }
+
+        # Type除外数
+        type_disc_row = self.conn.execute("SELECT COUNT(*) FROM metadata_records WHERE type_status = 'NG';").fetchone()
+        type_disc = type_disc_row[0] if type_disc_row else 0
+
+        # Rule (About/Ngram) 判定数
+        rule_ok_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE (type_status IS NULL OR type_status != 'NG') 
+              AND (adopted_stage IN ('RULE_ABOUT', 'RULE_NGRAM') OR matched_reason LIKE '[ルール合格]%');
+        """).fetchone()
+        rule_ok = rule_ok_row[0] if rule_ok_row else 0
+
+        rule_ng_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE (type_status IS NULL OR type_status != 'NG') 
+              AND drop_stage IN ('RULE_ABOUT', 'RULE_NGRAM');
+        """).fetchone()
+        rule_ng = rule_ng_row[0] if rule_ng_row else 0
+
+        rule_grey_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE (type_status IS NULL OR type_status != 'NG') 
+              AND final_decision = 'GREY';
+        """).fetchone()
+        rule_grey = rule_grey_row[0] if rule_grey_row else 0
+
+        # LLM判定数
+        llm_tot_row = self.conn.execute("SELECT COUNT(*) FROM metadata_records WHERE llm_evaluated = TRUE OR llm_target IS NOT NULL;").fetchone()
+        llm_total = llm_tot_row[0] if llm_tot_row else 0
+
+        llm_pass_row = self.conn.execute("SELECT COUNT(*) FROM metadata_records WHERE llm_target = TRUE;").fetchone()
+        llm_pass = llm_pass_row[0] if llm_pass_row else 0
+
+        llm_disc_row = self.conn.execute("SELECT COUNT(*) FROM metadata_records WHERE llm_target = FALSE;").fetchone()
+        llm_disc = llm_disc_row[0] if llm_disc_row else 0
+
+        # 専門家査読修正
+        human_ov_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE human_decision IS NOT NULL 
+              AND human_decision != (CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END);
+        """).fetchone()
+        human_override = human_ov_row[0] if human_ov_row else 0
+
+        # 最終採択数
+        final_ad_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格';
+        """).fetchone()
+        final_adopted = final_ad_row[0] if final_ad_row else 0
+
+        # 除外理由上位ランキング
+        top_drop_rows = self.conn.execute("""
+            SELECT coalesce(primary_reason, matched_reason, 'その他除外') AS reason, COUNT(*) AS cnt
+            FROM metadata_records
+            WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '除外'
+            GROUP BY reason
+            ORDER BY cnt DESC
+            LIMIT 10;
+        """).fetchall()
+
+        return {
+            "total_records": total,
+            "type_discarded": type_disc,
+            "type_passed": total - type_disc,
+            "rule_ok": rule_ok,
+            "rule_ng": rule_ng,
+            "rule_grey": rule_grey,
+            "llm_evaluated_total": llm_total,
+            "llm_passed": llm_pass,
+            "llm_discarded": llm_disc,
+            "human_override_count": human_override,
+            "final_adopted": final_adopted,
+            "final_discarded": total - final_adopted,
+            "top_drop_reasons": [(str(r[0]), int(r[1])) for r in top_drop_rows]
+        }
 
     def close(self):
         """接続終了"""

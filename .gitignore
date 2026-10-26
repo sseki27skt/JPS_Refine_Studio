@@ -72,11 +72,12 @@ data/benchmark_tmp/
 data/fetch_job_status.json
 data/fetch_job_status.json.tmp
 
-# Documentation (Allow development docs)
-docs/*/implementation_plan.md
-docs/*/task.md
-docs/*/walkthrough.md
-!docs/filter_process_optimization/
-!docs/review_portal_optimization/
-!docs/sparql_fetch_optimization/
+# Archive large datasets & Workspaces runtime data
+archive/data/
+data/workspaces/*/data/
+data/workspaces/*/snapshots/
+data/workspaces/*/exports/
+
+# Documentation
+!docs/
 

@@ -22,7 +22,10 @@ from modules.sparql_collector import (
     get_job_status,
     is_process_alive,
     fetch_uris_with_query_func,
-    DEFAULT_STATUS_FILE
+    DEFAULT_STATUS_FILE,
+    save_acquisition_manifest,
+    get_acquisition_manifest,
+    DEFAULT_MANIFEST_FILE
 )
 from modules.llm_query_expander import generate_sparql_queries
 from modules.duckdb_manager import DuckDBManager
@@ -40,11 +43,12 @@ def handle_exit(signum, frame):
 
 def main():
     parser = argparse.ArgumentParser(description="Japan Search メタデータ取得 バックグラウンドワーカー")
+    parser.add_argument("--workspace-id", type=str, default=None, help="対象ワークスペースID（指定時は各パスを自動解決）")
     parser.add_argument("--params-json", type=str, default=None, help="検索条件パラメータJSONパス（指定時はURI収集から全自動実行）")
-    parser.add_argument("--target-uris", type=str, default=os.path.join(CURRENT_DIR, "..", "data", "target_uris.csv"), help="対象URIリスト(CSVまたはTXT)")
-    parser.add_argument("--output-jsonl", type=str, default=os.path.join(CURRENT_DIR, "..", "data", "raw_metadata.jsonl"), help="出力先JSONLパス")
-    parser.add_argument("--status-file", type=str, default=DEFAULT_STATUS_FILE, help="ステータス記録用JSONパス")
-    parser.add_argument("--duckdb-path", type=str, default=os.path.join(CURRENT_DIR, "..", "data", "metadata_store.duckdb"), help="同期先DuckDBパス")
+    parser.add_argument("--target-uris", type=str, default=None, help="対象URIリスト(CSVまたはTXT)")
+    parser.add_argument("--output-jsonl", type=str, default=None, help="出力先JSONLパス")
+    parser.add_argument("--status-file", type=str, default=None, help="ステータス記録用JSONパス")
+    parser.add_argument("--duckdb-path", type=str, default=None, help="同期先DuckDBパス")
     parser.add_argument("--batch-size", type=int, default=10, help="初期バッチサイズ")
     parser.add_argument("--no-resume", action="store_true", help="レジュームを無効化（最初から再取得）")
     parser.add_argument("--no-adaptive", action="store_true", help="適応型レート制御を無効化")
@@ -52,8 +56,33 @@ def main():
 
     args = parser.parse_args()
 
+    # ワークスペースパスの解決
+    if args.workspace_id:
+        from modules.workspace_manager import WorkspaceManager
+        wm = WorkspaceManager()
+        ws_paths = wm.get_workspace_paths(args.workspace_id)
+        if not args.target_uris:
+            args.target_uris = ws_paths["PATH_TARGET_URIS"]
+        if not args.output_jsonl:
+            args.output_jsonl = ws_paths["PATH_RAW_METADATA"]
+        if not args.status_file:
+            args.status_file = ws_paths["PATH_JOB_STATUS"]
+        if not args.duckdb_path:
+            args.duckdb_path = ws_paths["PATH_DUCKDB"]
+
+    # デフォルトフォールバック
+    if not args.target_uris:
+        args.target_uris = os.path.join(CURRENT_DIR, "..", "data", "target_uris.csv")
+    if not args.output_jsonl:
+        args.output_jsonl = os.path.join(CURRENT_DIR, "..", "data", "raw_metadata.jsonl")
+    if not args.status_file:
+        args.status_file = DEFAULT_STATUS_FILE
+    if not args.duckdb_path:
+        args.duckdb_path = os.path.join(CURRENT_DIR, "..", "data", "metadata_store.duckdb")
+
     global ACTIVE_STATUS_FILE
     ACTIVE_STATUS_FILE = args.status_file
+
 
     # シグナルハンドラ設定
     signal.signal(signal.SIGINT, handle_exit)
@@ -140,6 +169,35 @@ def main():
             logger.info(f"[Worker PID={my_pid}] 対象URI収集完了: {len(unique_uris):,} 件 ➔ {args.target_uris}")
             print(f"[Worker PID={my_pid}] 対象URI収集完了: {len(unique_uris):,} 件 ➔ {args.target_uris}")
 
+            # 初期メタデータプール取得マニフェスト (Provenance) の保存
+            sparql_samples = {}
+            for name, func in queries:
+                try:
+                    sparql_samples[name] = func(100, 0)
+                except Exception:
+                    pass
+
+            manifest_data = {
+                "dataset_name": "Japan Search Cleansed Collection",
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "endpoint": "https://jpsearch.go.jp/rdf/sparql/",
+                "parameters": {
+                    "keywords": exp_params.get("keywords", []),
+                    "target_ndc": exp_params.get("ndc_codes", []),
+                    "exclude_ndc": exp_params.get("exclude_ndc_codes", []),
+                    "title_regex": exp_params.get("title_regex", ""),
+                    "desc_regex": exp_params.get("desc_regex", ""),
+                    "domain_definition": exp_params.get("domain_definition", "")
+                },
+                "sparql_queries": sparql_samples,
+                "metrics": {
+                    "total_target_uris": len(unique_uris),
+                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                }
+            }
+            manifest_path = os.path.join(os.path.dirname(args.output_jsonl), "acquisition_manifest.json")
+            save_acquisition_manifest(manifest_data, manifest_path)
+
         except Exception as e:
             err = f"URI網羅収集フェーズでエラーが発生しました: {e}"
             logger.error(f"[Worker] {err}")
@@ -196,6 +254,7 @@ def main():
             logger.warning(f"[Worker] DuckDBマネージャー初期化スキップ: {e}")
 
     # 取得処理実行
+    manifest_path = os.path.join(os.path.dirname(args.output_jsonl), "acquisition_manifest.json")
     try:
         build_metadata_for_uris(
             uri_list=unique_uris,
@@ -205,7 +264,8 @@ def main():
             resume=not args.no_resume,
             adaptive=not args.no_adaptive,
             status_file=args.status_file,
-            duckdb_manager=duck_mgr
+            duckdb_manager=duck_mgr,
+            manifest_file=manifest_path
         )
         logger.info(f"[Worker PID={my_pid}] 取得処理が正常に完了しました。")
         print(f"[Worker PID={my_pid}] 取得処理が正常に完了しました。")
