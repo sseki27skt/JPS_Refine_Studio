@@ -65,18 +65,18 @@ class DuckDBManager:
             );
         """)
         # 既存DBファイルに対するスキーママイグレーション
-        migration_columns = [
-            ("llm_evaluated", "BOOLEAN DEFAULT FALSE"),
-            ("type_reason", "VARCHAR DEFAULT NULL"),
-            ("about_reason", "VARCHAR DEFAULT NULL"),
-            ("ngram_reason", "VARCHAR DEFAULT NULL"),
-            ("adopted_stage", "VARCHAR DEFAULT NULL"),
-            ("drop_stage", "VARCHAR DEFAULT NULL"),
-            ("primary_reason", "VARCHAR DEFAULT NULL")
+        migration_queries = [
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS llm_evaluated BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS type_reason VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS about_reason VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS ngram_reason VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS adopted_stage VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS drop_stage VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS primary_reason VARCHAR DEFAULT NULL;"
         ]
-        for col_name, col_type in migration_columns:
+        for query in migration_queries:
             try:
-                self.conn.execute(f"ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                self.conn.execute(query)
             except Exception:
                 pass
 
@@ -175,10 +175,12 @@ class DuckDBManager:
             GROUP BY kw
             ORDER BY cnt DESC
         """
+        params = []
         if limit and limit > 0:
-            query += f" LIMIT {int(limit)}"
+            query += " LIMIT ?"
+            params.append(int(limit))
 
-        res = self.conn.execute(query).fetchall()
+        res = self.conn.execute(query, params).fetchall()
         return [(str(row[0]), int(row[1])) for row in res if row[0]]
 
     def extract_ngrams(self, min_n: int = 2, max_n: int = 3, top_k: int = 300) -> Dict[int, List[Tuple[str, int]]]:
@@ -188,11 +190,12 @@ class DuckDBManager:
         titles = [row[0] for row in self.conn.execute("SELECT title FROM metadata_records WHERE title IS NOT NULL;").fetchall()]
         
         results = {}
+        cleaner_regex = re.compile(r'[\s\(\)（）\[\]【】\d]+')
         for n in range(min_n, max_n + 1):
             counter = Counter()
             for title in titles:
                 # 記号・数字・空白の正規化
-                clean_t = re.sub(r'[\s\(\)（）\[\]【】\d]+', '', title)
+                clean_t = cleaner_regex.sub('', title)
                 t_len = len(clean_t)
                 if t_len >= n:
                     for i in range(t_len - n + 1):
@@ -678,8 +681,9 @@ class DuckDBManager:
             FROM metadata_records
             WHERE {where_sql}
             ORDER BY id
-            LIMIT {int(page_size)} OFFSET {int(offset)};
+            LIMIT ? OFFSET ?;
         """
+        params.extend([int(page_size), int(offset)])
         rows = self.conn.execute(fetch_query, params).fetchall()
 
         if has_temp_ng:
@@ -995,8 +999,9 @@ class DuckDBManager:
             FROM metadata_records
             WHERE {where_sql}
             ORDER BY id
-            LIMIT {int(page_size)} OFFSET {int(offset)};
+            LIMIT ? OFFSET ?;
         """
+        params.extend([int(page_size), int(offset)])
         rows = self.conn.execute(fetch_query, params).fetchall()
         records = [{
             "id": r[0],
@@ -1090,7 +1095,7 @@ class DuckDBManager:
                 FROM metadata_records
                 WHERE {where_sql}
                 ORDER BY id
-                LIMIT {int(page_size)} OFFSET {int(offset)};
+                LIMIT ? OFFSET ?;
             """
         else:
             fetch_query = f"""
@@ -1103,9 +1108,10 @@ class DuckDBManager:
                 FROM metadata_records
                 WHERE {where_sql}
                 ORDER BY id
-                LIMIT {int(page_size)} OFFSET {int(offset)};
+                LIMIT ? OFFSET ?;
             """
 
+        params.extend([int(page_size), int(offset)])
         rows = self.conn.execute(fetch_query, params).fetchall()
 
         try:

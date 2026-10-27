@@ -316,7 +316,11 @@ def render_step1_view(paths: dict):
     if "Google Gemini" in provider_choice:
         provider_code = "gemini"
         env_gemini_key = os.environ.get("GEMINI_API_KEY", "")
-        api_key_input = st.text_input("Google Gemini API Key:", value=env_gemini_key, type="password", help="APIキーを入力してください")
+        api_key_input = env_gemini_key
+        if api_key_input:
+            st.info("✅ Google Gemini API Key is configured via environment variable.")
+        else:
+            st.warning("❌ Google Gemini API Key is not configured in environment variables.")
         model_input = st.selectbox(
             "モデル選択:", 
             [
@@ -336,7 +340,11 @@ def render_step1_view(paths: dict):
     elif "OpenAI" in provider_choice:
         provider_code = "openai"
         env_openai_key = os.environ.get("OPENAI_API_KEY", "")
-        api_key_input = st.text_input("OpenAI API Key:", value=env_openai_key, type="password")
+        api_key_input = env_openai_key
+        if api_key_input:
+            st.info("✅ OpenAI API Key is configured via environment variable.")
+        else:
+            st.warning("❌ OpenAI API Key is not configured in environment variables.")
         api_base_input = "https://api.openai.com/v1"
         model_input = st.selectbox("モデル選択:", ["gpt-4o-mini", "gpt-4o"], index=0)
 
