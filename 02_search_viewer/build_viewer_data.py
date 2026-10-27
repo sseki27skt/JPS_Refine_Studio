@@ -25,6 +25,18 @@ INSTRUMENT_REGEXES = [
     ("笙", re.compile(r"笙")),
 ]
 
+# Pre-compiled regexes for DuckDB record genre inference
+RE_GENRE_DUCKDB_GAGAKU = re.compile(r"雅楽|笙|篳篥|竜笛|龍笛")
+RE_GENRE_DUCKDB_NOH = re.compile(r"謡|能|観世|宝生|謡曲|能楽")
+RE_GENRE_DUCKDB_SHAMISEN = re.compile(r"三味線|長唄|地歌|地唄|義太夫")
+RE_GENRE_DUCKDB_SHAKUHACHI = re.compile(r"尺八|琴古|都山")
+RE_GENRE_DUCKDB_BIWA = re.compile(r"琵琶|平曲")
+RE_GENRE_DUCKDB_SHOMYO = re.compile(r"声明|伽陀")
+
+# Pre-compiled regexes for instrument inference
+RE_INST_KOTO = re.compile(r"箏|琴|十三絃")
+RE_INST_SHAMISEN = re.compile(r"三味線|三線")
+
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "01_cleansing_studio")))
 from modules.duckdb_manager import DuckDBManager
@@ -78,16 +90,16 @@ if os.path.exists(DUCKDB_PATH):
 
                 genre = "古典資料/その他"
                 t_desc = (str(title) + " " + str(desc)).lower()
-                if any(k in t_desc for k in ["雅楽", "笙", "篳篥", "竜笛", "龍笛"]): genre = "雅楽"
-                elif any(k in t_desc for k in ["謡", "能", "観世", "宝生", "謡曲", "能楽"]): genre = "能楽/謡曲"
-                elif any(k in t_desc for k in ["三味線", "長唄", "地歌", "地唄", "義太夫"]): genre = "三味線音楽"
-                elif any(k in t_desc for k in ["尺八", "琴古", "都山"]): genre = "尺八楽"
-                elif any(k in t_desc for k in ["琵琶", "平曲"]): genre = "琵琶楽"
-                elif any(k in t_desc for k in ["声明", "伽陀"]): genre = "声明/仏教音楽"
+                if RE_GENRE_DUCKDB_GAGAKU.search(t_desc): genre = "雅楽"
+                elif RE_GENRE_DUCKDB_NOH.search(t_desc): genre = "能楽/謡曲"
+                elif RE_GENRE_DUCKDB_SHAMISEN.search(t_desc): genre = "三味線音楽"
+                elif RE_GENRE_DUCKDB_SHAKUHACHI.search(t_desc): genre = "尺八楽"
+                elif RE_GENRE_DUCKDB_BIWA.search(t_desc): genre = "琵琶楽"
+                elif RE_GENRE_DUCKDB_SHOMYO.search(t_desc): genre = "声明/仏教音楽"
 
                 instruments = []
-                if any(k in t_desc for k in ["箏", "琴", "十三絃"]): instruments.append("箏/琴")
-                if any(k in t_desc for k in ["三味線", "三線"]): instruments.append("三味線")
+                if RE_INST_KOTO.search(t_desc): instruments.append("箏/琴")
+                if RE_INST_SHAMISEN.search(t_desc): instruments.append("三味線")
                 if "尺八" in t_desc: instruments.append("尺八")
                 if "琵琶" in t_desc: instruments.append("琵琶")
                 if "笙" in t_desc: instruments.append("笙")
