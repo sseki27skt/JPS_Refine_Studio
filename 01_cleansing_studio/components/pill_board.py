@@ -131,36 +131,44 @@ def render_pill_board(
             draft_status = draft_dict.get(w)
             if draft_status == "NG":
                 is_ng, is_ok = True, False
-                d_tag = " [仮:除外]"
+                d_tag = " [仮除外]"
             elif draft_status == "OK":
                 is_ng, is_ok = False, True
-                d_tag = " [仮:合格]"
+                d_tag = " [仮保持]"
             elif draft_status == "RESET":
                 is_ng, is_ok = False, False
-                d_tag = " [仮:解除]"
+                d_tag = " [仮解除]"
             else:
                 is_ng = w in current_ng
                 is_ok = w in current_ok
                 d_tag = ""
 
             if is_ng:
-                btn_label = f"[除外] {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"❌ {disp_w} {cnt_str}{d_tag}"
             elif is_ok:
-                btn_label = f"[合格] {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"✅ {disp_w} {cnt_str}{d_tag}"
             elif parent_type == "NG":
-                btn_label = f"[親除外:{parent_word}] {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"❌ {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
             elif parent_type == "OK":
-                btn_label = f"[親合格:{parent_word}] {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"✅ {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
             else:
-                btn_label = f"[未判定] {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"❓ {disp_w} {cnt_str}{d_tag}"
 
             # トグル対応のクリックハンドラ
             def _handle_pill_click(word=w, mode_str=str(click_action_mode), cur_draft=draft_status, cur_ng=is_ng, cur_ok=is_ok):
                 target_status = "NG"
-                if "OK" in mode_str:
+                if "OK" in mode_str or "保持" in mode_str or "合格" in mode_str:
                     target_status = "OK"
-                elif "未判定" in mode_str or "RESET" in mode_str or "リセット" in mode_str:
+                elif "未判定" in mode_str or "RESET" in mode_str or "リセット" in mode_str or "❓" in mode_str or "？" in mode_str:
                     target_status = "RESET"
+
+                # 未判定リセット操作の場合
+                if target_status == "RESET":
+                    if cur_ng or cur_ok:
+                        draft_dict[word] = "RESET"
+                    else:
+                        draft_dict.pop(word, None)
+                    return
 
                 # 既に同じ仮設定がある場合はトグル解除
                 if cur_draft == target_status:
@@ -197,7 +205,7 @@ def render_pill_board(
                     st.markdown(make_rich_search_links_md(w))
                     st.markdown(f"- **件数内訳**: 未判定 **{eff_c:,} 件** ／ 全 **{cnt:,} 件**")
                     if parent_type:
-                        parent_label = "除外" if parent_type == "NG" else "合格"
+                        parent_label = "除外 (❌)" if parent_type == "NG" else "保持 (✅)"
                         st.info(f"親ルール継承: **{parent_label}** (親パターン: 『{parent_word}』)")
 
                     from components.file_utils import make_jps_item_url, make_jps_keyword_url

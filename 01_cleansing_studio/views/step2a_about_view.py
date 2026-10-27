@@ -367,6 +367,25 @@ def render_step2a_view(paths: dict):
     remaining_records_cnt = len(active_doc_indices)
     reduction_rate = discarded_records_cnt / max(1, total_records_cnt)
 
+    # 確定保存済みルールのみによるアクティブ文書インデックス (クラスタソート基準用)
+    committed_ng_set = set(current_ng)
+    comm_ng_doc_indices = set()
+    for kw in all_about_kws:
+        if kw in committed_ng_set:
+            comm_ng_doc_indices.update(kw_to_doc_indices[kw])
+        else:
+            for ng_w in committed_ng_set:
+                if len(ng_w) >= 2 and ng_w in kw:
+                    comm_ng_doc_indices.update(kw_to_doc_indices[kw])
+                    break
+    if ngram_ng_set:
+        ngram_pat = re.compile("|".join(re.escape(k) for k in sorted(ngram_ng_set, key=len, reverse=True)))
+        for idx, rec in enumerate(raw_records):
+            t_str = rec.get("title", "")
+            if ngram_pat.search(t_str):
+                comm_ng_doc_indices.add(idx)
+    committed_active_doc_indices = set(range(total_records_cnt)) - comm_ng_doc_indices
+
     all_kw_set = set([k for k, c in about_ranking])
     ng_classified_count = len(all_kw_set & live_ng)
     ok_classified_count = len(all_kw_set & live_ok)
@@ -390,12 +409,16 @@ def render_step2a_view(paths: dict):
             st.session_state["click_action_about_mode"] = "NGに設定"
 
         click_mode_options = [
-            "[除外] NGに設定",
-            "[保持] OKに設定",
-            "[未判定] に戻す",
-            "トグル切替"
+            "❌ [除外] NGに設定",
+            "✅ [保持] OKに設定",
+            "❓ [未判定] に戻す",
+            "🔄 トグル切替"
         ]
         mode_map = {
+            "❌ [除外] NGに設定": "NGに設定",
+            "✅ [保持] OKに設定": "OKに設定",
+            "❓ [未判定] に戻す": "未判定に戻す",
+            "🔄 トグル切替": "トグル切替",
             "[除外] NGに設定": "NGに設定",
             "[保持] OKに設定": "OKに設定",
             "[未判定] に戻す": "未判定に戻す",
@@ -404,7 +427,7 @@ def render_step2a_view(paths: dict):
         rev_mode_map = {v: k for k, v in mode_map.items()}
 
         cur_mode_val = st.session_state.get("click_action_about_mode", "NGに設定")
-        cur_mode_disp = rev_mode_map.get(cur_mode_val, "[除外] NGに設定")
+        cur_mode_disp = rev_mode_map.get(cur_mode_val, "❌ [除外] NGに設定")
 
         chosen_disp = st.radio(
             "ピルクリック時の動作:",
@@ -414,7 +437,7 @@ def render_step2a_view(paths: dict):
             help="クラスタ内および単体ボードの各ピルをクリックした際の判定動作を設定します。"
         )
         st.session_state["click_action_about_mode"] = mode_map[chosen_disp]
-        st.caption("キーボード: **Q** = NGモード ｜ **W** = OKモード ｜ **E** = リセット")
+        st.caption("キーボード: **Q** = ❌ NG除外 ｜ **W** = ✅ OK保持 ｜ **E** = ❓ リセット")
 
         st.write("---")
 
@@ -468,14 +491,21 @@ def render_step2a_view(paths: dict):
                 save_dict.update({k: "OK" for k in current_ok})
                 safe_save_json(save_dict, about_rules_path)
 
+                st.session_state.pop("cluster_order_ids", None)
                 st.session_state["chk_view_ver"] += 1
                 st.success("判別結果を確定し about_rules.json へ保存しました。")
                 st.rerun()
 
         if draft_count > 0:
             st.warning(f"現在 **{draft_count} 件** のキーワードが仮選択中です。")
-            if st.button(f"仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_cluster_draft_ctrl"):
-                _apply_and_save_about_draft()
+            c_dr1, c_dr2 = st.columns([3, 1.2])
+            with c_dr1:
+                if st.button(f"仮設定 ({draft_count} 件) を確定保存 ＆ 再ソート", type="primary", use_container_width=True, key="btn_apply_cluster_draft_ctrl"):
+                    _apply_and_save_about_draft()
+            with c_dr2:
+                if st.button("全破棄", type="secondary", use_container_width=True, key="btn_discard_all_about_draft", help="すべての仮選択を取り消します。"):
+                    draft_ab.clear()
+                    st.rerun()
         else:
             st.caption("すべてのルールが保存済みです。クラスタやピルを選択すると確定ボタンが表示されます。")
 
@@ -536,6 +566,9 @@ def render_step2a_view(paths: dict):
             help="他条件ですでに除外され、現在の残存件数が0件になったキーワードをクラスタ内から非表示にします。"
         )
         sort_cluster_by = st.selectbox("クラスタソート順:", ["残存データ件数順 (推奨)", "所属キーワード数順"], key="sb_cluster_sort")
+        if st.session_state.get("last_sort_cluster_by") != sort_cluster_by:
+            st.session_state["last_sort_cluster_by"] = sort_cluster_by
+            st.session_state.pop("cluster_order_ids", None)
         clusters_per_page = st.number_input("1回のクラスタ追加数", min_value=5, max_value=100, value=10, step=5, key="num_clusters_per_page")
 
         st.write("---")
@@ -548,6 +581,7 @@ def render_step2a_view(paths: dict):
                 st.session_state["edited_noise"] = set()
                 st.session_state["edited_strong"] = set()
                 st.session_state["draft_about_changes"] = {}
+                st.session_state.pop("cluster_order_ids", None)
                 safe_save_json({}, about_rules_path)
                 
                 data_dir = os.path.dirname(about_filtered_path)
@@ -596,13 +630,13 @@ def render_step2a_view(paths: dict):
                 un_c = len(kws) - ng_c - ok_c
 
                 if ng_c > 0 and ok_c == 0 and un_c == 0:
-                    status_badge = "全除外 (NG)"
+                    status_badge = "❌ 全除外 (NG)"
                 elif ok_c > 0 and ng_c == 0 and un_c == 0:
-                    status_badge = "全保持 (OK)"
+                    status_badge = "✅ 全保持 (OK)"
                 elif ok_c > 0 or ng_c > 0:
-                    status_badge = f"混合 (OK:{ok_c} / NG:{ng_c} / 未:{un_c})"
+                    status_badge = f"混合 (✅{ok_c} / ❌{ng_c} / ❓{un_c})"
                 else:
-                    status_badge = f"未判定 (全{un_c}件)"
+                    status_badge = f"❓ 未判定 (全{un_c}件)"
 
                 from components.ndc_utils import format_about_keyword_display
 
@@ -611,6 +645,7 @@ def render_step2a_view(paths: dict):
                 for k in kws:
                     cl_doc_set.update(kw_to_doc_indices.get(k, []))
                 cl_total_cnt = len(cl_doc_set)
+                cl_comm_cnt = len(cl_doc_set & committed_active_doc_indices)
                 cl_act_cnt = len(cl_doc_set & active_doc_indices)
 
                 # ピルの絞り込み（判定済み非表示 ＆ 残存0件非表示オプション）
@@ -637,7 +672,12 @@ def render_step2a_view(paths: dict):
                     return
 
                 kw_preview = ", ".join([format_about_keyword_display(k, 18) for k in kws[:4]]) + ("..." if len(kws) > 4 else "")
-                expander_title = f"{c['name']} [{status_badge}] （対象語句: {kw_preview} [{len(kws)}種類] ｜ 残存: {cl_act_cnt:,} 件 / 総 {cl_total_cnt:,} 件）"
+                if has_draft and cl_act_cnt != cl_comm_cnt:
+                    cnt_str = f"残存: {cl_comm_cnt:,} 件 ➔ 仮選択後: {cl_act_cnt:,} 件 / 総 {cl_total_cnt:,} 件"
+                else:
+                    cnt_str = f"残存: {cl_comm_cnt:,} 件 / 総 {cl_total_cnt:,} 件"
+                draft_indicator = " ⚡[仮設定中]" if has_draft else ""
+                expander_title = f"{c['name']} [{status_badge}]{draft_indicator} （対象語句: {kw_preview} [{len(kws)}種類] ｜ {cnt_str}）"
 
                 with st.expander(expander_title, expanded=True):
                     # 一括操作の対象キーワード選定（既存のOK/NG判定を保護）
@@ -647,21 +687,24 @@ def render_step2a_view(paths: dict):
 
                     b_col1, b_col2, b_col3 = st.columns(3)
                     with b_col1:
-                        btn_ok_label = f"未判定のみ一括 OK [{len(target_batch_kws)}件]" if is_partial else f"一括 OK 仮設定 [{len(kws)}件]"
+                        btn_ok_label = f"✅ 未判定のみ一括 OK [{len(target_batch_kws)}件]" if is_partial else f"✅ 一括 OK 仮設定 [{len(kws)}件]"
                         if st.button(btn_ok_label, key=f"btn_cl_ok_{cid}", type="secondary", use_container_width=True, disabled=(len(target_batch_kws) == 0)):
                             for k in target_batch_kws:
                                 draft_ab[k] = "OK"
                             st.rerun()
                     with b_col2:
-                        btn_ng_label = f"未判定のみ一括 NG [{len(target_batch_kws)}件]" if is_partial else f"一括 NG 仮設定 [{len(kws)}件]"
-                        if st.button(btn_ng_label, key=f"btn_cl_ng_{cid}", type="primary", use_container_width=True, disabled=(len(target_batch_kws) == 0)):
+                        btn_ng_label = f"❌ 未判定のみ一括 NG [{len(target_batch_kws)}件]" if is_partial else f"❌ 一括 NG 仮設定 [{len(kws)}件]"
+                        if st.button(btn_ng_label, key=f"btn_cl_ng_{cid}", type="secondary", use_container_width=True, disabled=(len(target_batch_kws) == 0)):
                             for k in target_batch_kws:
                                 draft_ab[k] = "NG"
                             st.rerun()
                     with b_col3:
-                        if st.button(f"一括 未判定リセット", key=f"btn_cl_reset_{cid}", use_container_width=True):
+                        if st.button(f"❓ 一括 未判定リセット", key=f"btn_cl_reset_{cid}", use_container_width=True):
                             for k in kws:
-                                draft_ab[k] = "RESET"
+                                if k in current_ng or k in current_ok:
+                                    draft_ab[k] = "RESET"
+                                else:
+                                    draft_ab.pop(k, None)
                             st.rerun()
 
                     if not visible_kws_info:
@@ -687,27 +730,39 @@ def render_step2a_view(paths: dict):
                             cnt_badge = f" ({eff_kw_cnt:,}件)" if eff_kw_cnt != tot_kw_cnt else f" ({tot_kw_cnt:,}件)"
                             draft_tag = " [仮]" if is_in_draft else ""
                             if st_val == "OK":
-                                lbl = f"[合格]{draft_tag} {disp_k}{cnt_badge}"
+                                lbl = f"✅ {disp_k}{cnt_badge}{draft_tag}"
                             elif st_val == "NG":
-                                lbl = f"[除外]{draft_tag} {disp_k}{cnt_badge}"
+                                lbl = f"❌ {disp_k}{cnt_badge}{draft_tag}"
                             else:
-                                lbl = f"[未]{draft_tag} {disp_k}{cnt_badge}"
+                                lbl = f"❓ {disp_k}{cnt_badge}{draft_tag}"
 
                             c_btn_k, c_pop_k = col_k.columns([4.8, 1.2])
                             with c_btn_k:
                                 if st.button(lbl, key=f"tgl_kw_{cid}_{kw}", use_container_width=True):
                                     cur_m = st.session_state.get("click_action_about_mode", "NGに設定")
                                     if cur_m == "NGに設定":
-                                        draft_ab[kw] = "NG"
+                                        if kw in draft_ab and draft_ab[kw] == "NG":
+                                            draft_ab.pop(kw, None)
+                                        else:
+                                            draft_ab[kw] = "NG"
                                     elif cur_m == "OKに設定":
-                                        draft_ab[kw] = "OK"
+                                        if kw in draft_ab and draft_ab[kw] == "OK":
+                                            draft_ab.pop(kw, None)
+                                        else:
+                                            draft_ab[kw] = "OK"
                                     elif cur_m == "未判定に戻す":
-                                        draft_ab[kw] = "RESET"
+                                        if kw in current_ng or kw in current_ok:
+                                            draft_ab[kw] = "RESET"
+                                        else:
+                                            draft_ab.pop(kw, None)
                                     else:
                                         if st_val == "OK":
                                             draft_ab[kw] = "NG"
                                         elif st_val == "NG":
-                                            draft_ab[kw] = "RESET"
+                                            if kw in current_ng or kw in current_ok:
+                                                draft_ab[kw] = "RESET"
+                                            else:
+                                                draft_ab.pop(kw, None)
                                         else:
                                             draft_ab[kw] = "OK"
                                     st.rerun()
@@ -744,36 +799,6 @@ def render_step2a_view(paths: dict):
                             rem_kw_cnt = len(visible_kws_info) - cur_kw_limit
                             if st.button(f"クラスタ内の残りのキーワード ({rem_kw_cnt}件) をすべて表示", key=f"btn_more_kws_{cid}", use_container_width=True):
                                 st.session_state[cl_limit_key] = len(visible_kws_info)
-                                st.rerun()
-
-                    # クラスタ内に仮設定がある場合はカード内にも即時確定保存ボタンを表示
-                    cluster_draft_kws = [k for k in kws if k in draft_ab]
-                    if cluster_draft_kws:
-                        st.write("---")
-                        c_save_col1, c_save_col2 = st.columns([3, 2])
-                        with c_save_col1:
-                            st.info(f"このクラスタ内に **{len(cluster_draft_kws)} 件** の仮設定があります。")
-                        with c_save_col2:
-                            if st.button(f"このクラスタを確定保存 ({len(cluster_draft_kws)}件)", key=f"btn_save_cl_card_{cid}", type="primary", use_container_width=True):
-                                for kw in cluster_draft_kws:
-                                    status = draft_ab[kw]
-                                    if status == "NG":
-                                        current_ng.add(kw)
-                                        current_ok.discard(kw)
-                                    elif status == "OK":
-                                        current_ok.add(kw)
-                                        current_ng.discard(kw)
-                                    elif status == "RESET":
-                                        current_ng.discard(kw)
-                                        current_ok.discard(kw)
-                                    del draft_ab[kw]
-
-                                save_dict = {k: "NG" for k in current_ng}
-                                save_dict.update({k: "OK" for k in current_ok})
-                                safe_save_json(save_dict, about_rules_path)
-
-                                st.session_state["chk_view_ver"] += 1
-                                st.success(f"クラスタ『{c['name']}』のルールを確定保存しました。")
                                 st.rerun()
 
             # 各キーワードのアクティブ残存件数を一括事前計算 (O(N))
@@ -825,10 +850,11 @@ def render_step2a_view(paths: dict):
                     cl_doc_set = set()
                     for k in kws:
                         cl_doc_set.update(kw_to_doc_indices.get(k, []))
+                    cl_comm_cnt = len(cl_doc_set & committed_active_doc_indices)
                     cl_act_cnt = len(cl_doc_set & active_doc_indices)
                     cl_tot_cnt = len(cl_doc_set)
 
-                    if hide_zero_cluster_pills and cl_act_cnt == 0 and not has_draft_in_cluster:
+                    if hide_zero_cluster_pills and cl_comm_cnt == 0 and not has_draft_in_cluster:
                         continue
 
                     display_clusters.append({
@@ -836,15 +862,23 @@ def render_step2a_view(paths: dict):
                         "ng_count": ng_c,
                         "ok_count": ok_c,
                         "un_count": un_c,
-                        "active_count": cl_act_cnt,
+                        "active_count": cl_comm_cnt,
+                        "realtime_active_count": cl_act_cnt,
                         "unique_total_count": cl_tot_cnt,
-                        "visible_kws_count": len(cluster_visible_kws)
+                        "visible_kws_count": len(cluster_visible_kws),
+                        "has_draft": has_draft_in_cluster
                     })
 
-                if sort_cluster_by == "所属キーワード数順":
-                    display_clusters.sort(key=lambda x: len(x["keywords"]), reverse=True)
+                # 確定保存＆再ソートが実行されるまでは現在の表示順を完全に固定
+                if "cluster_order_ids" not in st.session_state:
+                    if sort_cluster_by == "所属キーワード数順":
+                        display_clusters.sort(key=lambda x: len(x["keywords"]), reverse=True)
+                    else:
+                        display_clusters.sort(key=lambda x: x["active_count"], reverse=True)
+                    st.session_state["cluster_order_ids"] = [c["cluster_id"] for c in display_clusters]
                 else:
-                    display_clusters.sort(key=lambda x: x["active_count"], reverse=True)
+                    order_map = {cid: idx for idx, cid in enumerate(st.session_state["cluster_order_ids"])}
+                    display_clusters.sort(key=lambda x: order_map.get(x["cluster_id"], 999999))
 
                 total_display_clusters = len(display_clusters)
 
@@ -917,9 +951,9 @@ def render_step2a_view(paths: dict):
         btn2_type = "primary" if st.session_state["click_action_about_mode"] == "OKに設定" else "secondary"
         btn3_type = "primary" if st.session_state["click_action_about_mode"] == "未判定に戻す" else "secondary"
 
-        b1 = c_m1.button("【 Q 】 NG設定モード", key="btn_shortcut_ab_q", type=btn1_type, use_container_width=True)
-        b2 = c_m2.button("【 W 】 OK設定モード", key="btn_shortcut_ab_w", type=btn2_type, use_container_width=True)
-        b3 = c_m3.button("【 E 】 未判定リセット", key="btn_shortcut_ab_e", type=btn3_type, use_container_width=True)
+        b1 = c_m1.button("【 Q 】 ❌ NG除外モード", key="btn_shortcut_ab_q", type=btn1_type, use_container_width=True)
+        b2 = c_m2.button("【 W 】 ✅ OK保持モード", key="btn_shortcut_ab_w", type=btn2_type, use_container_width=True)
+        b3 = c_m3.button("【 E 】 ❓ 未判定リセット", key="btn_shortcut_ab_e", type=btn3_type, use_container_width=True)
 
         if hotkeys:
             if hotkeys.pressed("mode_ng"):
@@ -945,11 +979,11 @@ def render_step2a_view(paths: dict):
         click_action_mode = st.session_state["click_action_about_mode"]
 
         if click_action_mode == "NGに設定":
-            st.error("【現在の設定モード: NG (除外)】 (ショートカット: Q)")
+            st.error("【現在の設定モード: ❌ NG (除外)】 (ショートカット: Q)")
         elif click_action_mode == "OKに設定":
-            st.success("【現在の設定モード: OK (保持)】 (ショートカット: W)")
+            st.success("【現在の設定モード: ✅ OK (保持)】 (ショートカット: W)")
         elif click_action_mode == "未判定に戻す":
-            st.info("【現在の設定モード: 未判定リセット】 (ショートカット: E)")
+            st.info("【現在の設定モード: ❓ 未判定リセット】 (ショートカット: E)")
 
         filtered_ranking = about_ranking
         if view_filter_mode == "未判定のみ":
@@ -1144,11 +1178,11 @@ def render_step2a_view(paths: dict):
                 cur_st = stat["status"]
                 
                 if cur_st == "NG":
-                    st_badge = "[NG登録済]"
+                    st_badge = "❌ [NG登録済]"
                 elif cur_st == "OK":
-                    st_badge = "[OK登録済]"
+                    st_badge = "✅ [OK登録済]"
                 else:
-                    st_badge = "[未登録]"
+                    st_badge = "❓ [未登録]"
 
                 exp_header = f"『{kw}』 [全 {tot_h:,} 件ヒット / 未判定: {act_h:,} 件] ｜ {st_badge}"
                 with st.expander(exp_header, expanded=(tot_h > 0 and cur_st == "未登録")):

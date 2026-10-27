@@ -556,11 +556,11 @@ def render_step2b_view(paths: dict):
                     cur_st = stat["status"]
                     
                     if cur_st == "NG":
-                        st_badge = "[NG登録済]"
+                        st_badge = "❌ [NG登録済]"
                     elif cur_st == "OK":
-                        st_badge = "[OK登録済]"
+                        st_badge = "✅ [OK登録済]"
                     else:
-                        st_badge = "[未登録]"
+                        st_badge = "❓ [未登録]"
 
                     exp_header = f"『{kw}』 [全 {tot_h:,} 件ヒット / 未判定: {act_h:,} 件] ｜ {st_badge}"
                     with st.expander(exp_header, expanded=(tot_h > 0 and cur_st == "未登録")):
@@ -637,7 +637,7 @@ def render_step2b_view(paths: dict):
             with col_o2:
                 c_mode_n = st.radio(
                     f"クリック時アクション (N={n_val}):", 
-                    options=["[除外] NGに設定", "[保持] OKに設定", "未判定に戻す"], 
+                    options=["❌ [除外] NGに設定", "✅ [保持] OKに設定", "❓ 未判定に戻す"], 
                     horizontal=True,
                     key=f"c_mode_n_{n_val}"
                 )

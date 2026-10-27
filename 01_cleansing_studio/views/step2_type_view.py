@@ -220,7 +220,7 @@ def render_step2_type_view(paths: dict):
             is_ng = (t_lbl in effective_ng)
             d_tag = " [仮除外]" if draft_types.get(t_lbl) == "NG" else (" [仮解除]" if draft_types.get(t_lbl) == "RESET" else "")
 
-            btn_label = f"[除外] {t_lbl} ({cnt:,}件){d_tag}" if is_ng else f"{t_lbl} ({cnt:,}件){d_tag}"
+            btn_label = f"❌ {t_lbl} ({cnt:,}件){d_tag}" if is_ng else f"✅ {t_lbl} ({cnt:,}件){d_tag}"
             btn_type = "primary" if is_ng else "secondary"
 
             c_btn, c_pop = col.columns([4.8, 1.2])
