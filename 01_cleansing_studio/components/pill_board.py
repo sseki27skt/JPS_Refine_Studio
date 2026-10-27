@@ -123,7 +123,7 @@ def render_pill_board(
             sample_lines = [f"• {t[:40]}..." if len(t) > 40 else f"• {t}" for t in sample_titles if t]
             sample_header = f"【『{disp_w}』 {cnt_str}】\n"
             if sample_lines:
-                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※クリックで切替 / 右の[詳細]でプレビュー"
+                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※クリックで切替 / 右の[⋮]でプレビュー"
             else:
                 tooltip_txt = sample_header + f"クリックで切替 / 現在アクション: 【{click_action_mode}】"
 
@@ -185,7 +185,7 @@ def render_pill_board(
                     else:
                         draft_dict[word] = target_status
 
-            c_btn, c_pop = col.columns([5, 1])
+            c_btn, c_pop = col.columns([5.1, 0.9])
             with c_btn:
                 # 仮選択中は primary 表示
                 btn_type = "primary" if draft_status in ("NG", "OK") else "secondary"
@@ -200,7 +200,7 @@ def render_pill_board(
                 )
 
             with c_pop:
-                with st.popover("詳細", help=f"『{w}』の外部検索・該当資料詳細"):
+                with st.popover("⋮", use_container_width=True):
                     st.markdown(f"#### 『{w}』")
                     st.markdown(make_rich_search_links_md(w))
                     st.markdown(f"- **件数内訳**: 未判定 **{eff_c:,} 件** ／ 全 **{cnt:,} 件**")

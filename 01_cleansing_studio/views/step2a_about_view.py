@@ -781,7 +781,7 @@ def render_step2a_view(paths: dict):
                             else:
                                 lbl = f"❔ {disp_k}{cnt_badge}{draft_tag}"
 
-                            c_btn_k, c_pop_k = col_k.columns([4.8, 1.2])
+                            c_btn_k, c_pop_k = col_k.columns([5.1, 0.9])
                             with c_btn_k:
                                 if st.button(lbl, key=f"tgl_kw_{cid}_{kw}", use_container_width=True):
                                     cur_m = st.session_state.get("click_action_about_mode", "NGに設定")
@@ -812,7 +812,7 @@ def render_step2a_view(paths: dict):
                                             draft_ab[kw] = "OK"
                                     st.rerun()
                             with c_pop_k:
-                                if st.button("詳細", key=f"btn_det_{cid}_{kw}", help=f"『{disp_k}』の該当資料プレビュー・外部検索"):
+                                if st.button("⋮", key=f"btn_det_{cid}_{kw}", use_container_width=True):
                                     if hasattr(st, "dialog"):
                                         _show_about_keyword_dialog(kw, eff_kw_cnt, tot_kw_cnt)
                                     else:

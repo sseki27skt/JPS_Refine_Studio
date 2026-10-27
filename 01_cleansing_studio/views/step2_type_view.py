@@ -273,7 +273,7 @@ def render_step2_type_view(paths: dict):
             btn_label = f"❌ {t_lbl} ({cnt:,}件){d_tag}" if is_ng else f"✅ {t_lbl} ({cnt:,}件){d_tag}"
             btn_type = "primary" if is_ng else "secondary"
 
-            c_btn, c_pop = col.columns([4.8, 1.2])
+            c_btn, c_pop = col.columns([5.1, 0.9])
             with c_btn:
                 if st.button(btn_label, key=f"btn_t_{idx}_{t_lbl}", type=btn_type, use_container_width=True, help=f"クリックして除外/解除を切替 (現在: {'除外' if is_ng else '保持'})"):
                     if is_ng:
@@ -283,7 +283,7 @@ def render_step2_type_view(paths: dict):
                     st.rerun()
 
             with c_pop:
-                if st.button("詳細", key=f"btn_det_{idx}_{t_lbl}", help=f"『{t_lbl}』の資料一覧をポップアップ表示"):
+                if st.button("⋮", key=f"btn_det_{idx}_{t_lbl}", use_container_width=True):
                     if hasattr(st, "dialog"):
                         _show_type_details_dialog(t_lbl, full_uri, cnt, is_ng)
                     else:
