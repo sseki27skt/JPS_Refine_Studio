@@ -44,6 +44,8 @@ def cluster_about_keywords(about_ranking_tuples: list):
     from components.ndc_utils import (
         extract_ndc_number, 
         resolve_ndc_label, 
+        extract_ndlc_code,
+        resolve_ndlc_label,
         format_about_keyword_display,
         prefetch_about_keywords_batch,
         extract_ndlna_id, 
@@ -54,11 +56,12 @@ def cluster_about_keywords(about_ranking_tuples: list):
     prefetch_about_keywords_batch([kw for kw, _ in about_ranking_tuples[:200]])
 
     ndc_groups = defaultdict(list)
+    ndlc_groups = defaultdict(list)
     ndlna_items = []
     prefix_groups = defaultdict(list)
     unassigned = []
 
-    # 1. NDCコード / NDLNA典拠 / 階層区切り文字による分類
+    # 1. NDCコード / NDLCコード / NDLNA典拠 / 階層区切り文字による分類
     for kw, count in about_ranking_tuples:
         # A. NDCコードの判定
         ndc_num = extract_ndc_number(kw)
@@ -73,7 +76,13 @@ def cluster_about_keywords(about_ranking_tuples: list):
             ndlna_items.append((kw, count))
             continue
 
-        # C. 階層区切り文字（--, /, :, _, ･, 空白）
+        # C. NDLCコードの判定
+        ndlc_code = extract_ndlc_code(kw)
+        if ndlc_code:
+            ndlc_groups[ndlc_code].append((kw, count))
+            continue
+
+        # D. 階層区切り文字（--, /, :, _, ･, 空白）
         if "--" in kw:
             parts = kw.split("--")
             parent = "--".join(parts[:-1]) if len(parts) > 1 else parts[0]
@@ -103,7 +112,21 @@ def cluster_about_keywords(about_ranking_tuples: list):
         })
         cluster_idx += 1
 
-    # 3. NDL 典拠クラスタの生成 (NDLSH 件名 / NDLNA 人名・団体名)
+    # 3. NDLC分類クラスタの生成 (SPARQL APIに基づくラベル付与)
+    for ndlc_c, items in ndlc_groups.items():
+        items_sorted = sorted(items, key=lambda x: x[1], reverse=True)
+        total_cnt = sum(c for k, c in items_sorted)
+        lbl_str = resolve_ndlc_label(ndlc_c)
+        tag_lbl = f" [{lbl_str}]" if lbl_str else ""
+        clusters.append({
+            "cluster_id": f"cl_ndlc_{cluster_idx}",
+            "name": f"NDLC分類: {ndlc_c}{tag_lbl}",
+            "keywords": [k for k, c in items_sorted],
+            "total_count": total_cnt
+        })
+        cluster_idx += 1
+
+    # 4. NDL 典拠クラスタの生成 (NDLSH 件名 / NDLNA 人名・団体名)
     if ndlna_items:
         # 典拠クラスタに含まれる全キーワードを一括事前解決（SPARQL 1.1）
         auth_kws = [k for k, _ in ndlna_items]
@@ -237,28 +260,32 @@ def render_step2a_view(paths: dict):
 
     input_mtime = os.path.getmtime(input_path) if os.path.exists(input_path) else 0
 
-    with c_src2:
-        has_ngram_rules = os.path.exists(ngram_rules_path)
-        link_ngram_rules = False
-        if has_ngram_rules and "ngram_filtered" not in chosen_source:
-            link_ngram_rules = st.toggle(
-                "Step 2-C (タイトルNGルール) をリアルタイム連動",
-                value=False,
-                help="Step 2-C で登録済みのタイトル除外ルールに一致するレコードを、Step 2-B のシミュレーション上でも除外扱いにして分析します。",
-                key="tgl_step2a_link_ngram"
-            )
-        elif "ngram_filtered" in chosen_source:
-            st.success("Step 2-C の除外結果を反映したデータセットで分析中")
-
-    # Step 2-C タイトル NG ルールのロード (リアルタイム連動用)
+    # Step 2-C タイトル NG ルールのロード (双方向完全自動連動用)
+    has_ngram_rules = os.path.exists(ngram_rules_path)
     ngram_ng_set = set()
-    if link_ngram_rules and os.path.exists(ngram_rules_path):
+    if has_ngram_rules:
         try:
             with open(ngram_rules_path, 'r', encoding='utf-8') as f:
                 ng_r = json.load(f)
                 ngram_ng_set = set([k for k, v in ng_r.items() if v == "NG"])
         except Exception:
             ngram_ng_set = set()
+
+    with c_src2:
+        link_ngram_rules = False
+        if len(ngram_ng_set) > 0 and "ngram_filtered" not in chosen_source:
+            link_ngram_rules = st.toggle(
+                "🔗 Step 2-C (タイトルNGルール) を双方向自動連動",
+                value=True,
+                help="Step 2-C で確定登録済みのタイトル除外ルールに一致する資料を、Step 2-B の分析上でも自動的に除外扱いにして残存件数を計算します。OFFにすると2-A直後の素のデータで分析できます。",
+                key="tgl_step2a_link_ngram"
+            )
+            if link_ngram_rules:
+                st.caption(f"※ Step 2-C の登録ルール ({len(ngram_ng_set):,} 語) を自動反映中")
+            else:
+                st.caption("※ Step 2-C 連動を一時解除中 (2-A 直後の状態で分析)")
+        elif "ngram_filtered" in chosen_source:
+            st.success("Step 2-C の除外結果を反映したデータセットで分析中")
 
     use_duckdb = bool(os.path.exists(duckdb_path) and DuckDBManager is not None)
     exclude_ng_types = ("type_filtered" in chosen_source or chosen_source == data_source_options[0])
@@ -368,39 +395,70 @@ def render_step2a_view(paths: dict):
                     matched_ok_kws.add(kw)
                     break
 
-    # DuckDBを活用した超高速かつ正確な除外件数シミュレーション (0.01〜0.03秒)
+    # 超高速インメモリ転置インデックスによるリアルタイム除外＆残存計算 (0.001〜0.005秒)
+    from modules.about_index import get_about_inverted_index, get_cached_title_discarded_records
+    about_idx = get_about_inverted_index(duckdb_path, input_path, exclude_ng_types)
+
+    # 1. Step 2-C タイトルNGルールの除外レコードID（キャッシュ参照で 0.000秒）
+    ngram_ng_tuple = tuple(sorted(list(ngram_ng_set)))
+    title_discarded_ids = get_cached_title_discarded_records(about_idx, ngram_ng_tuple) if link_ngram_rules else set()
+
+    # 2. 確定保存済みルールによる基準件数（ピルクリック時は変化しないため完全キャッシュで 0.000秒）
     @st.cache_data(show_spinner=False)
-    def get_cached_ng_discard_count(db_p, ng_kws_tuple, exclude_types):
-        if not ng_kws_tuple:
-            return 0
-        if db_p and os.path.exists(db_p) and DuckDBManager is not None:
-            try:
-                db = get_duckdb_manager(db_p) if get_duckdb_manager else DuckDBManager(db_path=db_p)
-                cnt = db.count_records_matching_about_ng(list(ng_kws_tuple), exclude_ng_types=exclude_types)
-                return cnt
-            except Exception:
-                pass
-        # フォールバック (頻度合計からの重複推定)
-        raw_sum = sum(about_counts_map.get(k, 0) for k in ng_kws_tuple)
-        return min(total_records_cnt, int(raw_sum * 0.9))
+    def _compute_cached_comm_about_stats(_idx, current_ng_tup, _title_disc_ids, all_kws_tup, tot_cnt):
+        comm_ng_set = set(current_ng_tup)
+        comm_match = set()
+        for kw in all_kws_tup:
+            if kw in comm_ng_set:
+                comm_match.add(kw)
+            else:
+                for ng_w in comm_ng_set:
+                    if len(ng_w) >= 2 and ng_w in kw:
+                        comm_match.add(kw)
+                        break
+        comm_about_disc = _idx.compute_discarded_records(comm_match)
+        comm_disc_ids = comm_about_disc | _title_disc_ids
+        c_disc_cnt = len(comm_disc_ids)
+        c_rem_cnt = max(0, tot_cnt - c_disc_cnt)
+        c_act_counts = _idx.compute_active_counts(comm_disc_ids)
+        return comm_disc_ids, c_disc_cnt, c_rem_cnt, c_act_counts, comm_match
 
-    discarded_records_cnt = get_cached_ng_discard_count(duckdb_path, tuple(sorted(matched_ng_kws)), exclude_ng_types)
-    remaining_records_cnt = max(0, total_records_cnt - discarded_records_cnt)
+    current_ng_tuple = tuple(sorted(list(current_ng)))
+    all_about_kws_tuple = tuple(all_about_kws)
+    (
+        comm_discarded_rec_ids, 
+        comm_discarded_cnt, 
+        comm_remaining_cnt, 
+        comm_active_counts, 
+        comm_matched_ng
+    ) = _compute_cached_comm_about_stats(
+        about_idx, 
+        current_ng_tuple, 
+        title_discarded_ids, 
+        all_about_kws_tuple, 
+        total_records_cnt
+    )
+
+    # 3. リアルタイム除外＆残存計算（仮設定ドラフトの差分のみ約0.003秒で瞬時算出）
+    draft_ng_kws = set(k for k, v in draft_ab.items() if v == "NG")
+    draft_reset_kws = set(k for k, v in draft_ab.items() if v == "RESET")
+
+    if not draft_ng_kws and not draft_reset_kws:
+        # ドラフトがない場合は基準件数をそのまま使用 (0.000秒)
+        discarded_rec_ids = comm_discarded_rec_ids
+        discarded_records_cnt = comm_discarded_cnt
+        remaining_records_cnt = comm_remaining_cnt
+        active_about_counts = comm_active_counts
+        about_discarded_ids = comm_discarded_rec_ids - title_discarded_ids
+    else:
+        # ドラフト差分のみを即時合算 (約0.003秒)
+        about_discarded_ids = about_idx.compute_discarded_records(matched_ng_kws)
+        discarded_rec_ids = about_discarded_ids | title_discarded_ids
+        discarded_records_cnt = len(discarded_rec_ids)
+        remaining_records_cnt = max(0, total_records_cnt - discarded_records_cnt)
+        active_about_counts = about_idx.compute_active_counts(discarded_rec_ids)
+
     reduction_rate = discarded_records_cnt / max(1, total_records_cnt)
-
-    # 確定保存済みルールのみによる除外件数 (クラスタ表示基準用)
-    committed_ng_set = set(current_ng)
-    comm_matched_ng = set()
-    for kw in all_about_kws:
-        if kw in committed_ng_set:
-            comm_matched_ng.add(kw)
-        else:
-            for ng_w in committed_ng_set:
-                if len(ng_w) >= 2 and ng_w in kw:
-                    comm_matched_ng.add(kw)
-                    break
-    comm_discarded_cnt = get_cached_ng_discard_count(duckdb_path, tuple(sorted(comm_matched_ng)), exclude_ng_types)
-    comm_remaining_cnt = max(0, total_records_cnt - comm_discarded_cnt)
 
     all_kw_set = set([k for k, c in about_ranking])
     ng_classified_count = len(all_kw_set & live_ng)
@@ -461,13 +519,22 @@ def render_step2a_view(paths: dict):
         # 1. 絞り込み進捗メトリクス
         st.markdown("##### 絞り込み進捗 (レコード件数)")
         st.metric("初期メタデータセット", f"{total_records_cnt:,} 件")
-        st.metric(
-            "About 除外 (削ぎ落とし)", 
-            f"{discarded_records_cnt:,} 件", 
-            delta=f"-{reduction_rate:.1%}", 
-            delta_color="inverse",
-            help="schema:aboutにNGキーワードが含まれるため本工程で除外されるメタデータ件数"
-        )
+        if link_ngram_rules and len(title_discarded_ids) > 0:
+            st.metric(
+                "合算除外 (主題 ＋ タイトル)", 
+                f"{discarded_records_cnt:,} 件", 
+                delta=f"-{reduction_rate:.1%}", 
+                delta_color="inverse",
+                help=f"主題除外: {len(about_discarded_ids):,} 件 ＋ タイトル除外: {len(title_discarded_ids):,} 件 (重複排除後: {discarded_records_cnt:,} 件)"
+            )
+        else:
+            st.metric(
+                "About 除外 (削ぎ落とし)", 
+                f"{discarded_records_cnt:,} 件", 
+                delta=f"-{reduction_rate:.1%}", 
+                delta_color="inverse",
+                help="schema:aboutにNGキーワードが含まれるため本工程で除外されるメタデータ件数"
+            )
         st.metric(
             "本工程通過残存レコード", 
             f"{remaining_records_cnt:,} 件", 
@@ -490,6 +557,16 @@ def render_step2a_view(paths: dict):
         draft_ab = st.session_state["draft_about_changes"]
         draft_count = len(draft_ab)
 
+        def _clear_all_about_order_caches():
+            st.session_state.pop("cluster_order_ids", None)
+            st.session_state.pop("about_single_order", None)
+            for k in list(st.session_state.keys()):
+                if k.startswith("cl_kw_order_"):
+                    st.session_state.pop(k, None)
+            # Step 2-C (N-gram) 側の順序キャッシュも一括消去して完全同期
+            for n in range(2, 10):
+                st.session_state.pop(f"ngram_order_n_{n}", None)
+
         def _apply_and_save_about_draft():
             if draft_ab:
                 for kw, status in list(draft_ab.items()):
@@ -508,7 +585,7 @@ def render_step2a_view(paths: dict):
                 save_dict.update({k: "OK" for k in current_ok})
                 safe_save_json(save_dict, about_rules_path)
 
-                st.session_state.pop("cluster_order_ids", None)
+                _clear_all_about_order_caches()
                 st.session_state["chk_view_ver"] += 1
                 st.success("判別結果を確定し about_rules.json へ保存しました。")
                 st.rerun()
@@ -522,6 +599,7 @@ def render_step2a_view(paths: dict):
             with c_dr2:
                 if st.button("全破棄", type="secondary", use_container_width=True, key="btn_discard_all_about_draft", help="すべての仮選択を取り消します。"):
                     draft_ab.clear()
+                    _clear_all_about_order_caches()
                     st.rerun()
         else:
             st.caption("すべてのルールが保存済みです。クラスタやピルを選択すると確定ボタンが表示されます。")
@@ -701,23 +779,28 @@ def render_step2a_view(paths: dict):
                 else:
                     status_badge = f"❔ 未判定 (全{un_c}件)"
 
-                from components.ndc_utils import format_about_keyword_display, prefetch_about_keywords_batch
-                prefetch_about_keywords_batch(kws, max_items=len(kws))
+                from components.ndc_utils import format_about_keyword_display
 
                 # クラスタに属するキーワード件数をO(1)で高速算出
                 cl_total_cnt = sum(about_counts_map.get(k, 0) for k in kws)
-                cl_comm_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in comm_matched_ng)
-                cl_act_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in matched_ng_kws)
+                cl_comm_cnt = sum(comm_active_counts.get(k, 0) for k in kws) if comm_active_counts is not None else sum(about_counts_map.get(k, 0) for k in kws if k not in comm_matched_ng)
+                cl_act_cnt = sum(active_about_counts.get(k, 0) for k in kws) if active_about_counts is not None else sum(about_counts_map.get(k, 0) for k in kws if k not in matched_ng_kws)
 
                 # ピルの絞り込み（判定済み非表示 ＆ 残存0件非表示オプション）
                 # [NOTE] 確定保存済みのピルのみ非表示にし、現在選択中の「仮設定ピル (kw in draft_ab)」は保存/確定まで表示を継続！
                 visible_kws_info = []
                 for kw in kws:
                     tot_kw_cnt = about_counts_map.get(kw, 0)
-                    eff_kw_cnt = 0 if kw in matched_ng_kws else tot_kw_cnt
-                    st_val = get_eff_status(kw)
                     is_in_draft = (kw in draft_ab)
-                    
+                    if is_in_draft:
+                        # 仮設定中のキーワードは、自己除外前の本来の未判定残存件数を保持（最下位ワープを防止）
+                        eff_kw_cnt = comm_active_counts.get(kw, 0) if comm_active_counts is not None else tot_kw_cnt
+                    elif kw in matched_ng_kws:
+                        eff_kw_cnt = 0
+                    else:
+                        eff_kw_cnt = active_about_counts.get(kw, 0) if active_about_counts is not None else tot_kw_cnt
+
+                    st_val = get_eff_status(kw)
                     is_classified = (st_val in ("OK", "NG")) and not is_in_draft
                     is_zero_remaining = (eff_kw_cnt == 0) and not is_in_draft
 
@@ -726,6 +809,22 @@ def render_step2a_view(paths: dict):
                     if hide_zero_cluster_pills and is_zero_remaining:
                         continue
                     visible_kws_info.append((kw, eff_kw_cnt, st_val, tot_kw_cnt, is_in_draft))
+
+                # 確定保存されるまではクラスタ内ピルの表示順序を固定（クリック時のワープ・消失を根絶）
+                cl_kw_order_key = f"cl_kw_order_{cid}"
+                if cl_kw_order_key not in st.session_state:
+                    # 初回整列：残存影響度の大きい順に整列
+                    visible_kws_info.sort(key=lambda item: (item[1], item[3]), reverse=True)
+                    st.session_state[cl_kw_order_key] = [item[0] for item in visible_kws_info]
+                else:
+                    saved_kws = st.session_state[cl_kw_order_key]
+                    info_lookup = {item[0]: item for item in visible_kws_info}
+                    # 保存順序に従って配置し、新出キーワードがあれば末尾に追加
+                    ordered_info = [info_lookup[k] for k in saved_kws if k in info_lookup]
+                    for item in visible_kws_info:
+                        if item[0] not in saved_kws:
+                            ordered_info.append(item)
+                    visible_kws_info = ordered_info
 
                 # 表示すべきピルがなく、かつ仮設定もない場合はクラスタごと非表示
                 has_draft = any(k in draft_ab for k in kws)
@@ -849,7 +948,9 @@ def render_step2a_view(paths: dict):
 
             # 各キーワードのアクティブ残存件数は辞書参照でO(1)
             def _get_eff_k_cnt(k):
-                return 0 if k in matched_ng_kws else about_counts_map.get(k, 0)
+                if k in matched_ng_kws:
+                    return 0
+                return active_about_counts.get(k, 0) if active_about_counts is not None else about_counts_map.get(k, 0)
 
             def render_cluster_board():
                 display_clusters = []
@@ -893,10 +994,10 @@ def render_step2a_view(paths: dict):
 
                     # クラスタの残存件数をO(1)で計算
                     cl_tot_cnt = sum(about_counts_map.get(k, 0) for k in kws)
-                    cl_comm_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in comm_matched_ng)
-                    cl_act_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in matched_ng_kws)
+                    cl_comm_cnt = sum(comm_active_counts.get(k, 0) for k in kws) if comm_active_counts is not None else sum(about_counts_map.get(k, 0) for k in kws if k not in comm_matched_ng)
+                    cl_act_cnt = sum(active_about_counts.get(k, 0) for k in kws) if active_about_counts is not None else sum(about_counts_map.get(k, 0) for k in kws if k not in matched_ng_kws)
 
-                    if hide_zero_cluster_pills and cl_comm_cnt == 0 and not has_draft_in_cluster:
+                    if hide_zero_cluster_pills and cl_act_cnt == 0 and not has_draft_in_cluster:
                         continue
 
                     display_clusters.append({
@@ -937,6 +1038,12 @@ def render_step2a_view(paths: dict):
                 st.markdown(f"<div class='facet-hint'>全 {total_display_clusters} クラスタ中 {cur_cl_limit} クラスタを表示中</div>", unsafe_allow_html=True)
 
                 page_clusters = display_clusters[:cur_cl_limit]
+
+                # ページ内表示キーワードを一括事前解決 (描画ループ内での多重呼び出しを防止)
+                from components.ndc_utils import prefetch_about_keywords_batch
+                page_all_kws = [k for c in page_clusters for k in c["keywords"][:24]]
+                if page_all_kws:
+                    prefetch_about_keywords_batch(page_all_kws, max_items=len(page_all_kws))
 
                 st.write("---")
 
@@ -1051,20 +1158,54 @@ def render_step2a_view(paths: dict):
         # 残存未判定件数 (eff_cnt) の算出 (辞書参照でO(1))
         kw_eff_counts = {}
         for kw, cnt in filtered_ranking:
-            eff_c = 0 if kw in matched_ng_kws else cnt
+            if kw in draft_ab:
+                # 仮設定中のキーワードは、自己除外前の本来の未判定残存件数を保持（最下位ワープを防止）
+                eff_c = comm_active_counts.get(kw, 0) if comm_active_counts is not None else cnt
+            elif kw in matched_ng_kws:
+                eff_c = 0
+            else:
+                eff_c = active_about_counts.get(kw, 0) if active_about_counts is not None else cnt
             kw_eff_counts[kw] = eff_c
 
-        if hide_zero_about:
-            filtered_ranking = [
-                (kw, cnt) for kw, cnt in filtered_ranking 
-                if kw_eff_counts.get(kw, 0) > 0 or kw in current_ng or kw in current_ok
-            ]
+        # 確定保存＆再ソートが押されるまでは、表示順序とピル集合を完全に固定
+        single_order_key = "about_single_order"
+        last_about_sort_key = "last_about_sort_mode"
+        last_about_hide_zero_key = "last_about_hide_zero"
+        if (st.session_state.get(last_about_sort_key) != sort_about_mode or
+            st.session_state.get(last_about_hide_zero_key) != hide_zero_about):
+            st.session_state.pop(single_order_key, None)
+            st.session_state[last_about_sort_key] = sort_about_mode
+            st.session_state[last_about_hide_zero_key] = hide_zero_about
 
-        if sort_about_mode == "未判定影響度順":
-            filtered_ranking.sort(
-                key=lambda item: (kw_eff_counts.get(item[0], 0), item[1]),
-                reverse=True
-            )
+        if single_order_key not in st.session_state:
+            initial_ranking = list(filtered_ranking)
+            if hide_zero_about:
+                initial_ranking = [
+                    (kw, cnt) for kw, cnt in initial_ranking 
+                    if kw_eff_counts.get(kw, 0) > 0 or kw in current_ng or kw in current_ok or kw in draft_ab
+                ]
+            if sort_about_mode == "未判定影響度順":
+                initial_ranking.sort(
+                    key=lambda item: (kw_eff_counts.get(item[0], 0), item[1]),
+                    reverse=True
+                )
+            else:
+                initial_ranking.sort(key=lambda item: item[1], reverse=True)
+            st.session_state[single_order_key] = [it[0] for it in initial_ranking]
+
+        # 保存された順序リストから表示アイテムを復元（ドラフト編集中はピルが消えたり動いたりしない）
+        saved_single_kws = st.session_state[single_order_key]
+        rank_lookup = {item[0]: item for item in filtered_ranking}
+        display_ranking = []
+        for k in saved_single_kws:
+            if k not in rank_lookup:
+                continue
+            eff_c = kw_eff_counts.get(k, 0)
+            # 他条件（タイトル除外や他NGルール）で残存0件になった未判定キーワードは確実に非表示！
+            # ただし、操作中の仮設定ピル（k in draft_ab）や確定済みピルは表示を維持
+            if hide_zero_about and eff_c == 0 and k not in draft_ab and k not in current_ng and k not in current_ok:
+                continue
+            display_ranking.append(rank_lookup[k])
 
         class LazySamplesMap(dict):
             def __init__(self, db_p, counts_map, kw_eff, use_db, exclude_types):
@@ -1096,7 +1237,7 @@ def render_step2a_view(paths: dict):
 
         # 汎用ピルボードコンポーネント呼出
         render_pill_board(
-            items=filtered_ranking,
+            items=display_ranking,
             active_samples_map=active_samples_info,
             current_ng=current_ng,
             current_ok=current_ok,
@@ -1108,7 +1249,7 @@ def render_step2a_view(paths: dict):
 
         c_hdr1, c_hdr2 = st.columns([3, 2])
         with c_hdr1:
-            st.markdown(f"判定対象キーワード (該当: **{len(filtered_ranking)}** 件)")
+            st.markdown(f"判定対象キーワード (該当: **{len(display_ranking)}** 件)")
         with c_hdr2:
             draft_count = len(draft_ab)
             if draft_count > 0:
@@ -1148,8 +1289,8 @@ def render_step2a_view(paths: dict):
             active_impact_docs = set()
 
             for kw in parsed_custom_ab:
-                doc_indices = kw_to_doc_indices.get(kw, [])
-                act_indices = [idx for idx in doc_indices if idx in active_doc_indices]
+                doc_indices = list(about_idx.kw_to_rec_ids.get(kw, set()))
+                act_indices = [idx for idx in doc_indices if idx not in discarded_rec_ids]
                 
                 total_impact_docs.update(doc_indices)
                 active_impact_docs.update(act_indices)
@@ -1183,6 +1324,7 @@ def render_step2a_view(paths: dict):
                     for k in current_ng: save_dict[k] = "NG"
                     for k in current_ok: save_dict[k] = "OK"
                     safe_save_json(save_dict, about_rules_path)
+                    _clear_all_about_order_caches()
                     st.session_state["chk_view_ver"] += 1
                     st.cache_data.clear()
                     st.success(f"{len(parsed_custom_ab)} 件のキーワードを NG ルールへ登録しました。")
@@ -1197,6 +1339,7 @@ def render_step2a_view(paths: dict):
                     for k in current_ng: save_dict[k] = "NG"
                     for k in current_ok: save_dict[k] = "OK"
                     safe_save_json(save_dict, about_rules_path)
+                    _clear_all_about_order_caches()
                     st.session_state["chk_view_ver"] += 1
                     st.cache_data.clear()
                     st.success(f"{len(parsed_custom_ab)} 件のキーワードを OK ルールへ登録しました。")
@@ -1236,6 +1379,7 @@ def render_step2a_view(paths: dict):
                                 for k in current_ng: save_dict[k] = "NG"
                                 for k in current_ok: save_dict[k] = "OK"
                                 safe_save_json(save_dict, about_rules_path)
+                                _clear_all_about_order_caches()
                                 st.session_state["chk_view_ver"] += 1
                                 st.cache_data.clear()
                                 st.rerun()
@@ -1246,19 +1390,17 @@ def render_step2a_view(paths: dict):
                                 for k in current_ng: save_dict[k] = "NG"
                                 for k in current_ok: save_dict[k] = "OK"
                                 safe_save_json(save_dict, about_rules_path)
+                                _clear_all_about_order_caches()
                                 st.session_state["chk_view_ver"] += 1
                                 st.cache_data.clear()
                                 st.rerun()
 
                     st.caption(f"該当する資料の具体例 (先頭 {len(stat['doc_indices'])} 件):")
-                    from components.file_utils import make_jps_item_url
+                    from components.file_utils import make_jps_keyword_url
                     for idx_doc in stat["doc_indices"]:
-                        rec = raw_records[idx_doc]
-                        r_title = rec.get('title', '') or "（無題）"
-                        r_id = rec.get('id', '')
-                        creator_part = f" ({rec.get('creator')})" if rec.get('creator') else ""
-                        item_link = make_jps_item_url(r_id, r_title)
-                        st.markdown(f"• [**{r_title}**]({item_link}){creator_part}")
+                        r_title = about_idx.rec_id_to_title.get(idx_doc, f"レコード #{idx_doc}")
+                        jps_url = make_jps_keyword_url(r_title)
+                        st.markdown(f"• [**{r_title}**]({jps_url})")
         else:
             st.info("上記テキストエリアに除外したい主題単語（例: `工芸, 建築, 絵画, 彫刻, 陶芸, 写真`）を入力すると、一致する資料の検出と一括除外が行えます。")
 

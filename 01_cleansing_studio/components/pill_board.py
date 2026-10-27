@@ -86,8 +86,8 @@ def render_pill_board(
 
     page_items = items[:cur_limit]
 
-    # ボードコンテナ (縦スクロール可能)
-    board_container = st.container(height=600)
+    # ボードコンテナ (ページスクロールに統合し、クリック時のスクロール巻き戻りを防止)
+    board_container = st.container()
     with board_container:
         grid_cols = st.columns(3)
         for idx, item in enumerate(page_items):

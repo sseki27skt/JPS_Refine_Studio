@@ -30,9 +30,10 @@ except (ImportError, ValueError):
 
 
 @st.cache_data(show_spinner=False)
-def load_filtered_titles(file_path, file_mtime):
-    titles_data = []
-    if os.path.exists(file_path):
+def load_filtered_titles(file_path, file_mtime, db_path=None, about_ng_tuple=None, exclude_types=True):
+    # 1. もし about_filtered.jsonl が直接選択されている場合はそのファイルを直接読み込む (既に除外済み)
+    if file_path and "about_filtered" in file_path and os.path.exists(file_path):
+        titles_data = []
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 if not line.strip(): continue
@@ -43,12 +44,49 @@ def load_filtered_titles(file_path, file_mtime):
                     titles_data.append(title_str)
                 except Exception:
                     continue
+        if titles_data:
+            return titles_data
+
+    # 2. DuckDB が利用可能な場合は最優先で利用（前段の主題NGルールおよびデータ種別除外を動的に完全反映）
+    if db_path and os.path.exists(db_path) and DuckDBManager is not None:
+        try:
+            from modules.duckdb_manager import get_duckdb_manager
+            db = get_duckdb_manager(db_path) if get_duckdb_manager else DuckDBManager(db_path=db_path)
+            about_ng = list(about_ng_tuple) if about_ng_tuple else None
+            titles = db.get_active_titles(about_ng_keywords=about_ng, exclude_ng_types=exclude_types)
+            if titles:
+                return titles
+        except Exception:
+            pass
+
+    # 3. フォールバック: JSONL からの直接ロード（主題NG除外を適用）
+    titles_data = []
+    if file_path and os.path.exists(file_path):
+        about_ng_set = set(about_ng_tuple) if about_ng_tuple else set()
+        about_ng_partial = [w for w in about_ng_set if len(w) >= 2]
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                if not line.strip(): continue
+                try:
+                    item = json.loads(line)
+                    # 主題NGのチェック
+                    if about_ng_set:
+                        a_val = item.get("schema:about", item.get("about", []))
+                        a_list = a_val if isinstance(a_val, list) else [a_val]
+                        kws = [k.get("schema:name", k.get("name", "")) if isinstance(k, dict) else str(k) for k in a_list]
+                        if any(kw in about_ng_set or any(ng in kw for ng in about_ng_partial) for kw in kws):
+                            continue
+                    label_val = item.get("rdfs:label", item.get("schema:name", ""))
+                    title_str = str(label_val[0]) if isinstance(label_val, list) and label_val else str(label_val)
+                    titles_data.append(title_str)
+                except Exception:
+                    continue
     return titles_data
 
 
 @st.cache_data(show_spinner=False)
-def get_cached_ngrams_from_titles_fast(file_path, file_mtime, min_n=2, max_n=9):
-    titles = load_filtered_titles(file_path, file_mtime)
+def get_cached_ngrams_from_titles_fast(file_path, file_mtime, min_n=2, max_n=9, db_path=None, about_ng_tuple=None, exclude_types=True):
+    titles = load_filtered_titles(file_path, file_mtime, db_path=db_path, about_ng_tuple=about_ng_tuple, exclude_types=exclude_types)
     counts = {n: Counter() for n in range(min_n, max_n + 1)}
     samples = {n: defaultdict(list) for n in range(min_n, max_n + 1)}
 
@@ -76,10 +114,10 @@ def get_cached_ngrams_from_titles_fast(file_path, file_mtime, min_n=2, max_n=9):
 
 
 @st.cache_data(show_spinner=False)
-def count_ngram_discarded_records(file_path, file_mtime, ng_rules_tuple):
+def count_ngram_discarded_records(file_path, file_mtime, ng_rules_tuple, db_path=None, about_ng_tuple=None, exclude_types=True):
     if not ng_rules_tuple:
         return 0
-    titles = load_filtered_titles(file_path, file_mtime)
+    titles = load_filtered_titles(file_path, file_mtime, db_path=db_path, about_ng_tuple=about_ng_tuple, exclude_types=exclude_types)
     disc_cnt = 0
     for title in titles:
         if any(pattern in title for pattern in ng_rules_tuple):
@@ -88,8 +126,8 @@ def count_ngram_discarded_records(file_path, file_mtime, ng_rules_tuple):
 
 
 @st.cache_data(show_spinner=False)
-def get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple=None):
-    titles = load_filtered_titles(file_path, file_mtime)
+def get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple=None, db_path=None, about_ng_tuple=None, exclude_types=True):
+    titles = load_filtered_titles(file_path, file_mtime, db_path=db_path, about_ng_tuple=about_ng_tuple, exclude_types=exclude_types)
     res = []
     for t in titles:
         if not t:
@@ -103,8 +141,8 @@ def get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tup
 
 
 @st.cache_data(show_spinner=False)
-def get_cached_active_ngram_counts(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple, n_val):
-    titles = get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple)
+def get_cached_active_ngram_counts(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple, n_val, db_path=None, about_ng_tuple=None, exclude_types=True):
+    titles = get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple, db_path=db_path, about_ng_tuple=about_ng_tuple, exclude_types=exclude_types)
     # 正確な未判定残存数を集計（全件スキャン）
     counts = Counter()
     samples = defaultdict(list)
@@ -212,9 +250,23 @@ def render_step2b_view(paths: dict):
     if not os.path.exists(input_path):
         input_path = raw_metadata_path
 
+    # 前段（Step 2-B: 主題 about）の確定ルールの動的ロード（DuckDBリアルタイム連携用）
+    about_rules_path = paths.get('PATH_ABOUT_RULES', os.path.join(os.path.dirname(raw_metadata_path), "rules", "about_rules.json"))
+    about_ng_list = []
+    if os.path.exists(about_rules_path):
+        try:
+            with open(about_rules_path, 'r', encoding='utf-8') as f:
+                ar = json.load(f)
+                about_ng_list = [k for k, v in ar.items() if v == "NG"]
+        except Exception:
+            about_ng_list = []
+    about_ng_tuple = tuple(sorted(about_ng_list))
+
     with c_src2:
         if "about_filtered" in chosen_source:
             st.success("Step 2-B の除外結果を反映したデータセットで分析中")
+        elif len(about_ng_list) > 0 and ("type_filtered" in chosen_source or chosen_source == data_source_options[0]):
+            st.info(f"🔗 Step 2-B (主題NG: {len(about_ng_list):,} 語) を自動反映して分析中")
         elif "type_filtered" in chosen_source:
             st.success("Step 2-A の除外結果を反映したデータセットで分析中")
         else:
@@ -245,20 +297,52 @@ def render_step2b_view(paths: dict):
     all_draft_keys = [f"draft_n_{n}_changes" for n in range(min_n, max_n + 1)]
     total_draft_cnt = sum(len(st.session_state.get(k, {})) for k in all_draft_keys if isinstance(st.session_state.get(k), dict))
 
+    use_db_ngram = bool(os.path.exists(duckdb_path) and DuckDBManager is not None)
+    cur_db_p = duckdb_path if use_db_ngram else None
+    cur_about_ng = about_ng_tuple if ("about_filtered" in chosen_source or chosen_source == data_source_options[0]) else None
+    cur_exc_types = bool("type_filtered" in chosen_source or "about_filtered" in chosen_source or chosen_source == data_source_options[0])
+
     input_mtime = os.path.getmtime(input_path) if os.path.exists(input_path) else 0
-    input_titles = load_filtered_titles(input_path, input_mtime)
-    ngram_dict = get_cached_ngrams_from_titles_fast(input_path, input_mtime, min_n, max_n)
+    input_titles = load_filtered_titles(input_path, input_mtime, db_path=cur_db_p, about_ng_tuple=cur_about_ng, exclude_types=cur_exc_types)
+    ngram_dict = get_cached_ngrams_from_titles_fast(input_path, input_mtime, min_n, max_n, db_path=cur_db_p, about_ng_tuple=cur_about_ng, exclude_types=cur_exc_types)
     total_input_records = len(input_titles)
-    ngram_discarded_records = count_ngram_discarded_records(input_path, input_mtime, tuple(sorted(list(ngram_ng))))
+
+    # 超高速インメモリ転置インデックスによるリアルタイム双方向連動 (0.001秒)
+    from modules.ngram_index import get_ngram_inverted_index
+    ngram_idx = get_ngram_inverted_index(tuple(input_titles))
+
+    # 全文字条件（N=2〜9）の確定ルール＋仮設定ドラフトを完全集約
+    live_ngram_ng = set(ngram_ng)
+    live_ngram_ok = set(ngram_ok)
+    for n in range(min_n, max_n + 1):
+        d_map = st.session_state.get(f"draft_n_{n}_changes", {})
+        if isinstance(d_map, dict):
+            for w, st_val in d_map.items():
+                if st_val == "NG":
+                    live_ngram_ng.add(w)
+                    live_ngram_ok.discard(w)
+                elif st_val == "OK":
+                    live_ngram_ok.add(w)
+                    live_ngram_ng.discard(w)
+                elif st_val == "RESET":
+                    live_ngram_ng.discard(w)
+                    live_ngram_ok.discard(w)
+
+    # N=8等の長い語彙ルールで除外された分も全て含むリアルタイム除外タイトルID集合 (0.001秒)
+    live_discarded_title_ids = ngram_idx.compute_discarded_titles(live_ngram_ng)
+    ngram_discarded_records = len(live_discarded_title_ids)
     ngram_remaining_records = total_input_records - ngram_discarded_records
     ngram_reduction_rate = (ngram_discarded_records / max(1, total_input_records))
 
-    active_titles = get_cached_active_titles(
-        input_path, 
-        input_mtime, 
-        tuple(sorted(list(ngram_ng))),
-        tuple(sorted(list(ngram_ok)))
-    )
+    # 全タブ・前段ステップの順序キャッシュを一括消去するヘルパー関数
+    def _clear_all_ngram_order_caches():
+        for n in range(min_n, max_n + 1):
+            st.session_state.pop(f"ngram_order_n_{n}", None)
+        st.session_state.pop("cluster_order_ids", None)
+        st.session_state.pop("about_single_order", None)
+        for k in list(st.session_state.keys()):
+            if k.startswith("cl_kw_order_"):
+                st.session_state.pop(k, None)
 
     # 共通の確定保存関数
     def _apply_and_save_ngram_draft():
@@ -284,6 +368,7 @@ def render_step2b_view(paths: dict):
         if applied_any:
             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok)
             safe_save_json(save_dict, ngram_rules_path)
+            _clear_all_ngram_order_caches()
             st.session_state["ngram_view_ver"] += 1
             st.success("判別結果を確定し ngram_rules.json へ保存しました。")
             st.rerun()
@@ -322,8 +407,17 @@ def render_step2b_view(paths: dict):
         st.markdown("##### ルール確定 ＆ 保存")
         if total_draft_cnt > 0:
             st.warning(f"現在 **{total_draft_cnt} 件** のパターンが仮選択中です。")
-            if st.button(f"仮設定 ({total_draft_cnt} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_all_ngram_draft_ctrl"):
-                _apply_and_save_ngram_draft()
+            c_dr1, c_dr2 = st.columns([3, 1.2])
+            with c_dr1:
+                if st.button(f"仮設定 ({total_draft_cnt} 件) を確定保存 ＆ 再ソート", type="primary", use_container_width=True, key="btn_apply_all_ngram_draft_ctrl"):
+                    _apply_and_save_ngram_draft()
+            with c_dr2:
+                if st.button("全破棄", type="secondary", use_container_width=True, key="btn_discard_all_ngram_draft", help="すべての仮選択を取り消します。"):
+                    for dk in all_draft_keys:
+                        if dk in st.session_state:
+                            st.session_state[dk].clear()
+                    _clear_all_ngram_order_caches()
+                    st.rerun()
         else:
             st.caption("すべてのルールが保存済みです。ピルをクリックすると仮選択され、確定ボタンが表示されます。")
 
@@ -407,7 +501,7 @@ def render_step2b_view(paths: dict):
                 matched_records = []
                 for idx, t in enumerate(input_titles):
                     if kw_q_lower in t.lower():
-                        is_active = (t in active_titles)
+                        is_active = (idx not in live_discarded_title_ids)
                         matched_records.append({
                             "title": t,
                             "is_active": is_active
@@ -510,11 +604,14 @@ def render_step2b_view(paths: dict):
                 active_impact_docs = set()
 
                 for kw in parsed_custom_kws:
-                    matched_docs = [t for t in input_titles if kw in t]
-                    active_docs = [t for t in active_titles if kw in t]
+                    kw_lower = kw.lower()
+                    matched_ids = [idx for idx, t in enumerate(input_titles) if kw_lower in t.lower()]
+                    active_ids = [idx for idx in matched_ids if idx not in live_discarded_title_ids]
+                    matched_docs = [input_titles[idx] for idx in matched_ids]
+                    active_docs = [input_titles[idx] for idx in active_ids]
                     
-                    total_impact_docs.update(matched_docs)
-                    active_impact_docs.update(active_docs)
+                    total_impact_docs.update(matched_ids)
+                    active_impact_docs.update(active_ids)
                     
                     is_currently_ng = kw in ngram_ng
                     is_currently_ok = kw in ngram_ok
@@ -543,6 +640,7 @@ def render_step2b_view(paths: dict):
                             ngram_ok.discard(kw)
                         save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                         safe_save_json(save_dict, ngram_rules_path)
+                        _clear_all_ngram_order_caches()
                         st.session_state["ngram_view_ver"] += 1
                         st.success(f"{len(parsed_custom_kws)} 件のキーワードを NG ルールへ登録しました。")
                         st.rerun()
@@ -554,6 +652,7 @@ def render_step2b_view(paths: dict):
                             ngram_ng.discard(kw)
                         save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                         safe_save_json(save_dict, ngram_rules_path)
+                        _clear_all_ngram_order_caches()
                         st.session_state["ngram_view_ver"] += 1
                         st.success(f"{len(parsed_custom_kws)} 件のキーワードを OK ルールへ登録しました。")
                         st.rerun()
@@ -590,6 +689,7 @@ def render_step2b_view(paths: dict):
                                     ngram_ok.discard(kw)
                                     save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                                     safe_save_json(save_dict, ngram_rules_path)
+                                    _clear_all_ngram_order_caches()
                                     st.session_state["ngram_view_ver"] += 1
                                     st.rerun()
                             else:
@@ -597,6 +697,7 @@ def render_step2b_view(paths: dict):
                                     ngram_ng.discard(kw)
                                     save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                                     safe_save_json(save_dict, ngram_rules_path)
+                                    _clear_all_ngram_order_caches()
                                     st.session_state["ngram_view_ver"] += 1
                                     st.rerun()
 
@@ -673,45 +774,81 @@ def render_step2b_view(paths: dict):
                     continue
                 filtered_items.append((w, c, s))
 
-            active_counts, active_samples = get_cached_active_ngram_counts(
-                input_path, 
-                input_mtime, 
-                tuple(sorted(list(ngram_ng))),
-                tuple(sorted(list(ngram_ok))),
-                n_val
-            )
-
-            active_n_samples_map = {}
-            for w, c, s in filtered_items:
-                raw_eff = active_counts.get(w, 0)
-                eff_c = min(raw_eff, c)  # 未判定件数が全体件数を超えないよう安全ガード
-                act_s = active_samples.get(w, [])
-                active_n_samples_map[w] = {
-                    "eff_cnt": eff_c,
-                    "samples": act_s if act_s else (s[:10] if isinstance(s, list) else [])
-                }
-
-            if hide_zero_ngram:
-                filtered_items = [
-                    (w, c, s) for w, c, s in filtered_items 
-                    if active_n_samples_map.get(w, {}).get("eff_cnt", 0) > 0 or w in ngram_ng or w in ngram_ok
-                ]
-
-            if sort_mode_n == "未判定影響度順":
-                filtered_items.sort(
-                    key=lambda item: (
-                        active_n_samples_map.get(item[0], {}).get("eff_cnt", 0),
-                        item[1]
-                    ),
-                    reverse=True
-                )
-
             if f"draft_n_{n_val}_changes" not in st.session_state:
                 st.session_state[f"draft_n_{n_val}_changes"] = {}
             draft_n = st.session_state[f"draft_n_{n_val}_changes"]
 
+            # 表示対象候補語彙のリスト
+            target_words = [item[0] for item in filtered_items]
+
+            # 1. 基本の残存件数集計 (0.001秒)
+            realtime_active_counts = ngram_idx.compute_remaining_counts(target_words, live_discarded_title_ids)
+            
+            # 確定済みルールのみに対する基準件数（自己除外前の真の影響度）
+            comm_discarded_ids = ngram_idx.compute_discarded_titles(ngram_ng)
+            comm_active_counts = ngram_idx.compute_remaining_counts(target_words, comm_discarded_ids)
+
+            # 2. 【最重要】自分自身が仮除外されたことで自分自身のピルが0件扱いになり吹っ飛ぶのを防止
+            # 現在のタブで仮設定中の語彙については、自己除外前の本来の未判定影響度件数を保持
+            for dw in draft_n:
+                if dw in target_words:
+                    realtime_active_counts[dw] = comm_active_counts.get(dw, 0)
+
+            active_n_samples_map = {}
+            for w, c, s in filtered_items:
+                eff_c = min(realtime_active_counts.get(w, 0), c)
+                active_n_samples_map[w] = {
+                    "eff_cnt": eff_c,
+                    "samples": s[:10] if isinstance(s, list) else []
+                }
+
+            # 3. 確定保存＆再ソートが押されるまでは、現在のタブの表示ピル集合と順序を完全に固定（クリック時のレイアウトシフト・消失を根絶！）
+            order_key = f"ngram_order_n_{n_val}"
+            last_sort_key = f"last_sort_mode_{n_val}"
+            last_hide_zero_key = f"last_hide_zero_{n_val}"
+            if (st.session_state.get(last_sort_key) != sort_mode_n or 
+                st.session_state.get(last_hide_zero_key) != hide_zero_ngram):
+                st.session_state.pop(order_key, None)
+                st.session_state[last_sort_key] = sort_mode_n
+                st.session_state[last_hide_zero_key] = hide_zero_ngram
+
+            if order_key not in st.session_state:
+                initial_items = list(filtered_items)
+                if hide_zero_ngram:
+                    # 初回整列時のみ残存0件を候補から除外
+                    initial_items = [
+                        it for it in initial_items 
+                        if active_n_samples_map.get(it[0], {}).get("eff_cnt", 0) > 0 or it[0] in draft_n or it[0] in ngram_ng or it[0] in ngram_ok
+                    ]
+                if sort_mode_n == "未判定影響度順":
+                    initial_items.sort(
+                        key=lambda item: (
+                            active_n_samples_map.get(item[0], {}).get("eff_cnt", 0),
+                            item[1]
+                        ),
+                        reverse=True
+                    )
+                else:
+                    initial_items.sort(key=lambda item: item[1], reverse=True)
+                st.session_state[order_key] = [item[0] for item in initial_items]
+
+            # 固定された表示順序とピル集合を復元（ドラフト編集中はピルが消えたり動いたりしない）
+            order_words = st.session_state[order_key]
+            item_map = {item[0]: item for item in filtered_items}
+            display_items = []
+            for w in order_words:
+                if w not in item_map:
+                    continue
+                eff_cnt = active_n_samples_map.get(w, {}).get("eff_cnt", 0)
+                # 残存未判定0件を非表示にする設定の時：
+                # 他の条件（長いN-gram除外や主題除外）により未判定残存件数が0になったピルは絶対に非表示にする！
+                # ただし、操作中の仮設定ピル（w in draft_n）や確定済みピル（w in ngram_ng or w in ngram_ok）は表示を維持
+                if hide_zero_ngram and eff_cnt == 0 and w not in draft_n and w not in ngram_ng and w not in ngram_ok:
+                    continue
+                display_items.append(item_map[w])
+
             render_pill_board(
-                items=filtered_items,
+                items=display_items,
                 active_samples_map=active_n_samples_map,
                 current_ng=ngram_ng,
                 current_ok=ngram_ok,

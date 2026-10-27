@@ -119,16 +119,18 @@ if "nav_target" in st.session_state:
 if "main_menu_choice" not in st.session_state or st.session_state["main_menu_choice"] not in menu_options:
     st.session_state["main_menu_choice"] = "プロジェクト・履歴マネージャー"
 
-# サイドバーラジオのウィジェット用キー（_sb_main_menu_radio）と同期
-# ウィジェット作成前に代入するため、StreamlitWidgetAlreadyInstantiatedError を完全に防止
-st.session_state["_sb_main_menu_radio"] = st.session_state["main_menu_choice"]
+current_choice = st.session_state["main_menu_choice"]
+choice_idx = menu_options.index(current_choice) if current_choice in menu_options else 0
 
 def _on_menu_change():
-    st.session_state["main_menu_choice"] = st.session_state["_sb_main_menu_radio"]
+    new_val = st.session_state.get("_sb_main_menu_radio")
+    if new_val in menu_options:
+        st.session_state["main_menu_choice"] = new_val
 
 choice = st.sidebar.radio(
     "工程を選択:",
     menu_options,
+    index=choice_idx,
     format_func=format_menu_label,
     key="_sb_main_menu_radio",
     on_change=_on_menu_change

@@ -230,6 +230,55 @@ class DuckDBManager:
             "about_list": r[3] or []
         } for r in rows]
 
+    def get_active_titles(self, about_ng_keywords: list[str] = None, exclude_ng_types: bool = True) -> list[str]:
+        """
+        前段の除外条件（データ種別 ＋ 主題About NGの完全一致・部分一致）を動的に反映したアクティブレコードのタイトル一覧を高速取得 (0.05秒)
+        """
+        where_clauses = ["title IS NOT NULL", "trim(title) != ''"]
+        if exclude_ng_types:
+            where_clauses.append("(type_status IS NULL OR type_status != 'NG')")
+        params = []
+        if about_ng_keywords:
+            ng_set = set(about_ng_keywords)
+            ng_partial = [w for w in ng_set if len(w) >= 2]
+            try:
+                all_db_kws = [r[0] for r in self.conn.execute("SELECT DISTINCT unnest(about_list) FROM metadata_records WHERE about_list IS NOT NULL;").fetchall() if r[0]]
+                matched_ng = set()
+                for kw in all_db_kws:
+                    if kw in ng_set:
+                        matched_ng.add(kw)
+                    else:
+                        for pw in ng_partial:
+                            if pw in kw:
+                                matched_ng.add(kw)
+                                break
+            except Exception:
+                matched_ng = ng_set
+
+            if matched_ng:
+                where_clauses.append("NOT list_has_any(about_list, ?::VARCHAR[])")
+                params.append(list(matched_ng))
+
+        where_sql = " AND ".join(where_clauses)
+        try:
+            rows = self.conn.execute(f"SELECT title FROM metadata_records WHERE {where_sql};", params).fetchall()
+            return [str(r[0]) for r in rows if r[0]]
+        except Exception:
+            try:
+                # フォールバック
+                where_fb = ["title IS NOT NULL", "trim(title) != ''"]
+                if exclude_ng_types:
+                    where_fb.append("(type_status IS NULL OR type_status != 'NG')")
+                fb_params = []
+                if about_ng_keywords and matched_ng:
+                    where_fb.append("NOT EXISTS (SELECT 1 FROM unnest(about_list) AS a(val) WHERE list_contains(?::VARCHAR[], a.val))")
+                    fb_params.append(list(matched_ng))
+                where_fb_sql = " AND ".join(where_fb)
+                rows = self.conn.execute(f"SELECT title FROM metadata_records WHERE {where_fb_sql};", fb_params).fetchall()
+                return [str(r[0]) for r in rows if r[0]]
+            except Exception:
+                return []
+
     def extract_ngrams(self, min_n: int = 2, max_n: int = 3, top_k: int = 300) -> Dict[int, List[Tuple[str, int]]]:
         """
         DB内の全タイトルからN-gramを高速抽出・集計
@@ -1475,6 +1524,70 @@ class DuckDBManager:
                 return res[0] if res else 0
             except Exception:
                 return 0
+
+    def get_active_about_keyword_counts(self, ng_keywords: list[str] = None, limit: Optional[int] = None, exclude_ng_types: bool = True) -> Dict[str, int]:
+        """
+        NG条件（Type除外 ＋ About NGルール群）を除外したアクティブレコード母集団における
+        schema:about キーワードの残存出現回数をDuckDBで高速一括集計 (0.05〜0.1秒)
+        """
+        where_clauses = ["about_list IS NOT NULL", "len(about_list) > 0"]
+        if exclude_ng_types:
+            where_clauses.append("(type_status IS NULL OR type_status != 'NG')")
+        
+        params = []
+        if ng_keywords:
+            where_clauses.append("NOT list_has_any(about_list, ?::VARCHAR[])")
+            params.append(list(ng_keywords))
+
+        where_sql = " AND ".join(where_clauses)
+
+        try:
+            query = f"""
+                SELECT kw, COUNT(*) AS cnt
+                FROM (
+                    SELECT unnest(about_list) AS kw
+                    FROM metadata_records
+                    WHERE {where_sql}
+                )
+                WHERE kw IS NOT NULL AND trim(kw) != ''
+                GROUP BY kw
+                ORDER BY cnt DESC
+            """
+            if limit and limit > 0:
+                query += " LIMIT ?"
+                params.append(int(limit))
+
+            res = self.conn.execute(query, params).fetchall()
+            return {str(row[0]): int(row[1]) for row in res if row[0]}
+        except Exception:
+            # list_has_any が未サポート等の場合はフォールバック
+            try:
+                where_clauses_fallback = ["about_list IS NOT NULL", "len(about_list) > 0"]
+                if exclude_ng_types:
+                    where_clauses_fallback.append("(type_status IS NULL OR type_status != 'NG')")
+                fb_params = []
+                if ng_keywords:
+                    where_clauses_fallback.append("NOT EXISTS (SELECT 1 FROM unnest(about_list) AS a(val) WHERE list_contains(?::VARCHAR[], a.val))")
+                    fb_params.append(list(ng_keywords))
+                where_fb_sql = " AND ".join(where_clauses_fallback)
+                query = f"""
+                    SELECT kw, COUNT(*) AS cnt
+                    FROM (
+                        SELECT unnest(about_list) AS kw
+                        FROM metadata_records
+                        WHERE {where_fb_sql}
+                    )
+                    WHERE kw IS NOT NULL AND trim(kw) != ''
+                    GROUP BY kw
+                    ORDER BY cnt DESC
+                """
+                if limit and limit > 0:
+                    query += " LIMIT ?"
+                    fb_params.append(int(limit))
+                res = self.conn.execute(query, fb_params).fetchall()
+                return {str(row[0]): int(row[1]) for row in res if row[0]}
+            except Exception:
+                return {}
 
     def close(self):
         """接続終了"""
