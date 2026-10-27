@@ -175,10 +175,12 @@ class DuckDBManager:
             GROUP BY kw
             ORDER BY cnt DESC
         """
+        params = []
         if limit and limit > 0:
-            query += f" LIMIT {int(limit)}"
+            query += " LIMIT ?"
+            params.append(int(limit))
 
-        res = self.conn.execute(query).fetchall()
+        res = self.conn.execute(query, params).fetchall()
         return [(str(row[0]), int(row[1])) for row in res if row[0]]
 
     def extract_ngrams(self, min_n: int = 2, max_n: int = 3, top_k: int = 300) -> Dict[int, List[Tuple[str, int]]]:
@@ -678,8 +680,9 @@ class DuckDBManager:
             FROM metadata_records
             WHERE {where_sql}
             ORDER BY id
-            LIMIT {int(page_size)} OFFSET {int(offset)};
+            LIMIT ? OFFSET ?;
         """
+        params.extend([int(page_size), int(offset)])
         rows = self.conn.execute(fetch_query, params).fetchall()
 
         if has_temp_ng:
@@ -995,8 +998,9 @@ class DuckDBManager:
             FROM metadata_records
             WHERE {where_sql}
             ORDER BY id
-            LIMIT {int(page_size)} OFFSET {int(offset)};
+            LIMIT ? OFFSET ?;
         """
+        params.extend([int(page_size), int(offset)])
         rows = self.conn.execute(fetch_query, params).fetchall()
         records = [{
             "id": r[0],
@@ -1090,7 +1094,7 @@ class DuckDBManager:
                 FROM metadata_records
                 WHERE {where_sql}
                 ORDER BY id
-                LIMIT {int(page_size)} OFFSET {int(offset)};
+                LIMIT ? OFFSET ?;
             """
         else:
             fetch_query = f"""
@@ -1103,9 +1107,10 @@ class DuckDBManager:
                 FROM metadata_records
                 WHERE {where_sql}
                 ORDER BY id
-                LIMIT {int(page_size)} OFFSET {int(offset)};
+                LIMIT ? OFFSET ?;
             """
 
+        params.extend([int(page_size), int(offset)])
         rows = self.conn.execute(fetch_query, params).fetchall()
 
         try:
