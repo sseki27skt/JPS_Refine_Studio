@@ -157,8 +157,19 @@ def render_step3_view(paths: dict):
     st.write("---")
 
     # =========================================================================
-    # 2. 一括エクスポート実行ボタン
+    # 2. 一括エクスポート実行ボタン ＆ オプション
     # =========================================================================
+    c_opt1, c_opt2 = st.columns([7, 3])
+    with c_opt1:
+        st.markdown("#### 学術研究パッケージの一括生成")
+        st.caption("検索ポータル用JSON、完全追跡CSV（PRISMA準拠）、および必要に応じて各工程の中間JSONLを一括出力します。")
+    with c_opt2:
+        opt_export_intermediate = st.checkbox(
+            "各工程の中間JSONLも出力",
+            value=True,
+            help="DuckDB内の全履歴から、Step 2-A通過データ(type_filtered.jsonl)やルール合格データ等を高速ストリーミング出力します。"
+        )
+
     if st.button("学術研究パッケージ（検索用JSON ＆ 全件追跡CSV ＆ PRISMAレポート）の一括生成・出力", type="primary", use_container_width=True):
         records = []
         viewer_records = []
@@ -228,6 +239,17 @@ def render_step3_view(paths: dict):
                 prisma_md_text = generate_prisma_markdown_report(prisma_stats, manifest)
                 with open(path_prisma_md, 'w', encoding='utf-8') as f:
                     f.write(prisma_md_text)
+
+            # D. 中間データセット (Intermediate JSONL) の高速一括出力 (オプションON時)
+            if opt_export_intermediate:
+                path_type_jsonl = os.path.join(data_dir, "type_filtered.jsonl")
+                path_rule_ok_jsonl = os.path.join(data_dir, "rule_ok_filtered.jsonl")
+                path_grey_jsonl = os.path.join(data_dir, "target_for_llm.jsonl")
+
+                db.export_intermediate_jsonl('type', path_type_jsonl)
+                db.export_intermediate_jsonl('rule_ok', path_rule_ok_jsonl)
+                db.export_intermediate_jsonl('rule_grey', path_grey_jsonl)
+                db.export_intermediate_jsonl('verified', verified_jsonl_path)
 
         # フォールバック処理 (JSONLから直接パース)
         else:
@@ -370,6 +392,54 @@ def render_step3_view(paths: dict):
                 )
         else:
             st.button("acquisition_manifest.json (未出力)", disabled=True, use_container_width=True)
+
+    st.write("---")
+    st.markdown("##### 3. 各工程の中間データセット（Provenance JSONL）")
+    st.caption("作業の追跡可能性を担保するため、DuckDBから生成された各工程の中間抽出データをダウンロードできます。")
+    c_m1, c_m2, c_m3 = st.columns(3)
+
+    path_type_f = os.path.join(data_dir, "type_filtered.jsonl")
+    path_rule_ok_f = os.path.join(data_dir, "rule_ok_filtered.jsonl")
+    path_grey_f = os.path.join(data_dir, "target_for_llm.jsonl")
+
+    with c_m1:
+        if os.path.exists(path_type_f):
+            with open(path_type_f, 'rb') as f:
+                st.download_button(
+                    label="Step 2-A通過 (type_filtered.jsonl)",
+                    data=f,
+                    file_name="type_filtered.jsonl",
+                    mime="application/jsonlines",
+                    use_container_width=True
+                )
+        else:
+            st.button("type_filtered.jsonl (未出力)", disabled=True, use_container_width=True)
+
+    with c_m2:
+        if os.path.exists(path_rule_ok_f):
+            with open(path_rule_ok_f, 'rb') as f:
+                st.download_button(
+                    label="ルール合格 (rule_ok_filtered.jsonl)",
+                    data=f,
+                    file_name="rule_ok_filtered.jsonl",
+                    mime="application/jsonlines",
+                    use_container_width=True
+                )
+        else:
+            st.button("rule_ok_filtered.jsonl (未出力)", disabled=True, use_container_width=True)
+
+    with c_m3:
+        if os.path.exists(path_grey_f):
+            with open(path_grey_f, 'rb') as f:
+                st.download_button(
+                    label="LLM推論対象 (target_for_llm.jsonl)",
+                    data=f,
+                    file_name="target_for_llm.jsonl",
+                    mime="application/jsonlines",
+                    use_container_width=True
+                )
+        else:
+            st.button("target_for_llm.jsonl (未出力)", disabled=True, use_container_width=True)
 
     # 最下部ナビゲーション
     render_step_navigation(

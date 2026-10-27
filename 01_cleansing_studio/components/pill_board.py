@@ -152,14 +152,14 @@ def render_pill_board(
             elif parent_type == "OK":
                 btn_label = f"✅ {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
             else:
-                btn_label = f"❓ {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"❔ {disp_w} {cnt_str}{d_tag}"
 
             # トグル対応のクリックハンドラ
             def _handle_pill_click(word=w, mode_str=str(click_action_mode), cur_draft=draft_status, cur_ng=is_ng, cur_ok=is_ok):
                 target_status = "NG"
                 if "OK" in mode_str or "保持" in mode_str or "合格" in mode_str:
                     target_status = "OK"
-                elif "未判定" in mode_str or "RESET" in mode_str or "リセット" in mode_str or "❓" in mode_str or "？" in mode_str:
+                elif "未判定" in mode_str or "RESET" in mode_str or "リセット" in mode_str or "❔" in mode_str or "❓" in mode_str or "？" in mode_str:
                     target_status = "RESET"
 
                 # 未判定リセット操作の場合

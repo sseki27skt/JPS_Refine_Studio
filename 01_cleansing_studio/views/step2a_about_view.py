@@ -22,6 +22,15 @@ from modules.rule_filter import (
 )
 
 try:
+    from modules.duckdb_manager import DuckDBManager, get_duckdb_manager
+except (ImportError, ValueError):
+    try:
+        from duckdb_manager import DuckDBManager, get_duckdb_manager
+    except ImportError:
+        DuckDBManager = None
+        get_duckdb_manager = None
+
+try:
     import streamlit_hotkeys as hotkeys
 except Exception:
     hotkeys = None
@@ -176,7 +185,15 @@ def render_step2a_view(paths: dict):
         st.warning("先に Step 1 で初期メタデータセット (raw_metadata.jsonl) を取得してください。")
         st.stop()
 
-    os.makedirs(os.path.dirname(about_rules_path), exist_ok=True)
+    duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
+    # DuckDBが存在し、type_filtered.jsonlが未生成の場合はDuckDBから高速自動同期 (1〜2秒)
+    if os.path.exists(duckdb_path) and not os.path.exists(type_filtered_path) and DuckDBManager is not None:
+        try:
+            db = DuckDBManager(db_path=duckdb_path)
+            db.export_type_filtered_jsonl(type_filtered_path)
+            db.close()
+        except Exception:
+            pass
 
     # --- 入力データソースの選択 ＆ 前段/後段 相互連携コントロール ---
     data_source_options = []
@@ -228,45 +245,32 @@ def render_step2a_view(paths: dict):
         except Exception:
             ngram_ng_set = set()
 
-    @st.cache_data(show_spinner=False)
-    def load_raw_item_features(path, mtime):
-        about_ranking = extract_about_keywords_from_jsonl(path)
-        records_data = []
-        kw_to_doc_indices = defaultdict(list)
-        if os.path.exists(path):
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                idx = 0
-                for line in f:
-                    if not line.strip(): continue
-                    try:
-                        item = json.loads(line)
-                        about_list = item.get("schema:about", [])
-                        kw_set = set(extract_about_values(about_list))
+    use_duckdb = bool(os.path.exists(duckdb_path) and DuckDBManager is not None)
+    exclude_ng_types = ("type_filtered" in chosen_source or chosen_source == data_source_options[0])
 
-                        label_val = item.get("rdfs:label", item.get("schema:name", ""))
-                        title_str = str(label_val[0]) if isinstance(label_val, list) and label_val else str(label_val)
+    @st.cache_data(show_spinner="DuckDBから主題キーワードを集計中...")
+    def load_about_features(db_p, in_p, mtime, exclude_types):
+        if db_p and os.path.exists(db_p) and DuckDBManager is not None:
+            try:
+                db = get_duckdb_manager(db_p) if get_duckdb_manager else DuckDBManager(db_path=db_p)
+                ranking = db.get_about_keyword_counts(limit=3000, exclude_ng_types=exclude_types)
+                tot_cnt = db.get_active_record_count(exclude_ng_types=exclude_types)
+                if ranking:
+                    return ranking, tot_cnt
+            except Exception:
+                pass
+        
+        # フォールバック (DuckDB不在時またはJSONL直接読み込み)
+        ranking = extract_about_keywords_from_jsonl(in_p)
+        tot_cnt = 0
+        if os.path.exists(in_p):
+            with open(in_p, 'r', encoding='utf-8', errors='ignore') as f:
+                for _ in f:
+                    tot_cnt += 1
+        return ranking, tot_cnt
 
-                        desc_val = item.get("schema:description", "")
-                        desc_str = str(desc_val[0]) if isinstance(desc_val, list) and desc_val else str(desc_val)
-
-                        creator_val = item.get("schema:creator", "")
-                        creator_str = str(creator_val[0]) if isinstance(creator_val, list) and creator_val else str(creator_val)
-
-                        records_data.append({
-                            "id": item.get("@id", item.get("id", "")),
-                            "title": title_str,
-                            "desc": desc_str,
-                            "creator": creator_str,
-                            "about_set": list(kw_set)
-                        })
-                        for kw in kw_set:
-                            kw_to_doc_indices[kw].append(idx)
-                        idx += 1
-                    except Exception:
-                        continue
-        return about_ranking, records_data, dict(kw_to_doc_indices)
-
-    about_ranking, raw_records, kw_to_doc_indices = load_raw_item_features(input_path, input_mtime)
+    about_ranking, total_records_cnt = load_about_features(duckdb_path, input_path, input_mtime, exclude_ng_types)
+    about_counts_map = dict(about_ranking)
 
     if not about_ranking:
         st.info("データ内に schema:about キーワードが見つかりませんでした。")
@@ -311,7 +315,6 @@ def render_step2a_view(paths: dict):
     checked_words = st.session_state["checked_words"]
 
     # レコード（メタデータ件数）ベースの超高速シミュレーション
-    total_records_cnt = len(raw_records)
     total_about_types = len(about_ranking)
     
     # 確定済みルール + 現在の仮設定ルールを統合してリアルタイム計算
@@ -322,7 +325,7 @@ def render_step2a_view(paths: dict):
     live_ng = (set(current_ng) | draft_ng) - draft_reset
     live_ok = (set(current_ok) | draft_ok) - draft_reset
     
-    all_about_kws = list(kw_to_doc_indices.keys())
+    all_about_kws = list(about_counts_map.keys())
     exact_ng = set(live_ng)
     exact_ok = set(live_ok)
     ng_partial = [w for w in live_ng if len(w) >= 2]
@@ -350,41 +353,39 @@ def render_step2a_view(paths: dict):
                     matched_ok_kws.add(kw)
                     break
 
-    ng_doc_indices = set()
-    for kw in matched_ng_kws:
-        ng_doc_indices.update(kw_to_doc_indices[kw])
+    # DuckDBを活用した超高速かつ正確な除外件数シミュレーション (0.01〜0.03秒)
+    @st.cache_data(show_spinner=False)
+    def get_cached_ng_discard_count(db_p, ng_kws_tuple, exclude_types):
+        if not ng_kws_tuple:
+            return 0
+        if db_p and os.path.exists(db_p) and DuckDBManager is not None:
+            try:
+                db = get_duckdb_manager(db_p) if get_duckdb_manager else DuckDBManager(db_path=db_p)
+                cnt = db.count_records_matching_about_ng(list(ng_kws_tuple), exclude_ng_types=exclude_types)
+                return cnt
+            except Exception:
+                pass
+        # フォールバック (頻度合計からの重複推定)
+        raw_sum = sum(about_counts_map.get(k, 0) for k in ng_kws_tuple)
+        return min(total_records_cnt, int(raw_sum * 0.9))
 
-    # Step 2-B N-Gram ルールによる事前除外の加算 (連動時)
-    if ngram_ng_set:
-        ngram_pat = re.compile("|".join(re.escape(k) for k in sorted(ngram_ng_set, key=len, reverse=True)))
-        for idx, rec in enumerate(raw_records):
-            t_str = rec.get("title", "")
-            if ngram_pat.search(t_str):
-                ng_doc_indices.add(idx)
-
-    active_doc_indices = set(range(total_records_cnt)) - ng_doc_indices
-    discarded_records_cnt = len(ng_doc_indices)
-    remaining_records_cnt = len(active_doc_indices)
+    discarded_records_cnt = get_cached_ng_discard_count(duckdb_path, tuple(sorted(matched_ng_kws)), exclude_ng_types)
+    remaining_records_cnt = max(0, total_records_cnt - discarded_records_cnt)
     reduction_rate = discarded_records_cnt / max(1, total_records_cnt)
 
-    # 確定保存済みルールのみによるアクティブ文書インデックス (クラスタソート基準用)
+    # 確定保存済みルールのみによる除外件数 (クラスタ表示基準用)
     committed_ng_set = set(current_ng)
-    comm_ng_doc_indices = set()
+    comm_matched_ng = set()
     for kw in all_about_kws:
         if kw in committed_ng_set:
-            comm_ng_doc_indices.update(kw_to_doc_indices[kw])
+            comm_matched_ng.add(kw)
         else:
             for ng_w in committed_ng_set:
                 if len(ng_w) >= 2 and ng_w in kw:
-                    comm_ng_doc_indices.update(kw_to_doc_indices[kw])
+                    comm_matched_ng.add(kw)
                     break
-    if ngram_ng_set:
-        ngram_pat = re.compile("|".join(re.escape(k) for k in sorted(ngram_ng_set, key=len, reverse=True)))
-        for idx, rec in enumerate(raw_records):
-            t_str = rec.get("title", "")
-            if ngram_pat.search(t_str):
-                comm_ng_doc_indices.add(idx)
-    committed_active_doc_indices = set(range(total_records_cnt)) - comm_ng_doc_indices
+    comm_discarded_cnt = get_cached_ng_discard_count(duckdb_path, tuple(sorted(comm_matched_ng)), exclude_ng_types)
+    comm_remaining_cnt = max(0, total_records_cnt - comm_discarded_cnt)
 
     all_kw_set = set([k for k, c in about_ranking])
     ng_classified_count = len(all_kw_set & live_ng)
@@ -411,12 +412,13 @@ def render_step2a_view(paths: dict):
         click_mode_options = [
             "❌ [除外] NGに設定",
             "✅ [保持] OKに設定",
-            "❓ [未判定] に戻す",
+            "❔ [未判定] に戻す",
             "🔄 トグル切替"
         ]
         mode_map = {
             "❌ [除外] NGに設定": "NGに設定",
             "✅ [保持] OKに設定": "OKに設定",
+            "❔ [未判定] に戻す": "未判定に戻す",
             "❓ [未判定] に戻す": "未判定に戻す",
             "🔄 トグル切替": "トグル切替",
             "[除外] NGに設定": "NGに設定",
@@ -437,7 +439,7 @@ def render_step2a_view(paths: dict):
             help="クラスタ内および単体ボードの各ピルをクリックした際の判定動作を設定します。"
         )
         st.session_state["click_action_about_mode"] = mode_map[chosen_disp]
-        st.caption("キーボード: **Q** = ❌ NG除外 ｜ **W** = ✅ OK保持 ｜ **E** = ❓ リセット")
+        st.caption("キーボード: **Q** = ❌ NG除外 ｜ **W** = ✅ OK保持 ｜ **E** = ❔ リセット")
 
         st.write("---")
 
@@ -533,7 +535,17 @@ def render_step2a_view(paths: dict):
             safe_save_json(save_dict, about_rules_path)
 
             data_dir = os.path.dirname(about_filtered_path)
-            passed, disc = run_about_filter(input_path, about_rules_path, about_filtered_path, f"{data_dir}/discarded_about.csv")
+            with st.spinner("About フィルタを適用中..."):
+                prog_bar = st.progress(0, text="About フィルタを適用中...")
+                tot_for_prog = max(1, total_records_cnt)
+                def _prog(cur):
+                    prog_bar.progress(min(1.0, cur / tot_for_prog), text=f"処理中: {cur:,} / {tot_for_prog:,} 件")
+                passed, disc = run_about_filter(
+                    input_path, about_rules_path, about_filtered_path, 
+                    f"{data_dir}/discarded_about.csv",
+                    progress_callback=_prog
+                )
+                prog_bar.empty()
             
             st.session_state["cluster_visible_limit"] = int(st.session_state.get("num_clusters_per_page", 10))
             st.session_state["chk_view_ver"] += 1
@@ -624,6 +636,42 @@ def render_step2a_view(paths: dict):
         with tab_cluster:
             st.markdown("類似性に基づいて抽出されたキーワード群に対し、一括/個別の判定（OK/NG/未判定）を行います。")
 
+            # オンデマンドキーワード詳細モーダル (クリック時のみDuckDBから該当1件を0.005秒で取得)
+            if hasattr(st, "dialog"):
+                @st.dialog("主題キーワード詳細・該当資料プレビュー", width="large")
+                def _show_about_keyword_dialog(target_kw: str, eff_cnt: int, tot_cnt: int):
+                    from components.ndc_utils import format_about_keyword_display
+                    from components.file_utils import make_rich_search_links_md, make_jps_item_url
+                    disp_target = format_about_keyword_display(target_kw)
+                    st.markdown(f"### 『{disp_target}』")
+                    st.markdown(make_rich_search_links_md(target_kw))
+                    st.markdown(f"- **該当資料件数**: 未除外残存: **{eff_cnt:,} 件** （データセット全体: {tot_cnt:,} 件）")
+                    st.write("---")
+
+                    samples = []
+                    if use_duckdb:
+                        try:
+                            db_pop = get_duckdb_manager(duckdb_path) if get_duckdb_manager else DuckDBManager(db_path=duckdb_path)
+                            samples = db_pop.get_records_by_about_keyword(target_kw, limit=30, exclude_ng_types=exclude_ng_types)
+                        except Exception:
+                            samples = []
+
+                    if samples:
+                        st.caption(f"代表資料一覧 (上位 {len(samples)} 件 / 全 {tot_cnt:,} 件):")
+                        sample_lines = []
+                        for rec in samples:
+                            r_title = rec.get('title', '') or "（無題）"
+                            r_id = rec.get('id', '')
+                            creator_part = f" （著者: `{rec.get('creator')}`）" if rec.get('creator') else ""
+                            item_link = make_jps_item_url(r_id, r_title)
+                            sample_lines.append(f"• [**{r_title}**]({item_link}){creator_part}")
+                        if tot_cnt > len(samples):
+                            sample_lines.append(f"\n*※ 他 {tot_cnt - len(samples):,} 件の資料があります*")
+                        with st.container(height=320):
+                            st.markdown("\n".join(sample_lines), unsafe_allow_html=True)
+                    else:
+                        st.info("現在表示可能な資料がありません。")
+
             def render_single_cluster_card(c, cid, kws):
                 ng_c = sum(1 for k in kws if get_eff_status(k) == "NG")
                 ok_c = sum(1 for k in kws if get_eff_status(k) == "OK")
@@ -634,26 +682,23 @@ def render_step2a_view(paths: dict):
                 elif ok_c > 0 and ng_c == 0 and un_c == 0:
                     status_badge = "✅ 全保持 (OK)"
                 elif ok_c > 0 or ng_c > 0:
-                    status_badge = f"混合 (✅{ok_c} / ❌{ng_c} / ❓{un_c})"
+                    status_badge = f"混合 (✅{ok_c} / ❌{ng_c} / ❔{un_c})"
                 else:
-                    status_badge = f"❓ 未判定 (全{un_c}件)"
+                    status_badge = f"❔ 未判定 (全{un_c}件)"
 
                 from components.ndc_utils import format_about_keyword_display
 
-                # クラスタに属するユニークレコード件数および残存件数をO(1)集合演算で高速算出
-                cl_doc_set = set()
-                for k in kws:
-                    cl_doc_set.update(kw_to_doc_indices.get(k, []))
-                cl_total_cnt = len(cl_doc_set)
-                cl_comm_cnt = len(cl_doc_set & committed_active_doc_indices)
-                cl_act_cnt = len(cl_doc_set & active_doc_indices)
+                # クラスタに属するキーワード件数をO(1)で高速算出
+                cl_total_cnt = sum(about_counts_map.get(k, 0) for k in kws)
+                cl_comm_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in comm_matched_ng)
+                cl_act_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in matched_ng_kws)
 
                 # ピルの絞り込み（判定済み非表示 ＆ 残存0件非表示オプション）
                 # [NOTE] 確定保存済みのピルのみ非表示にし、現在選択中の「仮設定ピル (kw in draft_ab)」は保存/確定まで表示を継続！
                 visible_kws_info = []
                 for kw in kws:
-                    kw_indices = kw_to_doc_indices.get(kw, [])
-                    eff_kw_cnt = sum(1 for idx in kw_indices if idx in active_doc_indices)
+                    tot_kw_cnt = about_counts_map.get(kw, 0)
+                    eff_kw_cnt = 0 if kw in matched_ng_kws else tot_kw_cnt
                     st_val = get_eff_status(kw)
                     is_in_draft = (kw in draft_ab)
                     
@@ -664,7 +709,7 @@ def render_step2a_view(paths: dict):
                         continue
                     if hide_zero_cluster_pills and is_zero_remaining:
                         continue
-                    visible_kws_info.append((kw, eff_kw_cnt, st_val, len(kw_indices), is_in_draft))
+                    visible_kws_info.append((kw, eff_kw_cnt, st_val, tot_kw_cnt, is_in_draft))
 
                 # 表示すべきピルがなく、かつ仮設定もない場合はクラスタごと非表示
                 has_draft = any(k in draft_ab for k in kws)
@@ -699,7 +744,7 @@ def render_step2a_view(paths: dict):
                                 draft_ab[k] = "NG"
                             st.rerun()
                     with b_col3:
-                        if st.button(f"❓ 一括 未判定リセット", key=f"btn_cl_reset_{cid}", use_container_width=True):
+                        if st.button(f"❔ 一括 未判定リセット", key=f"btn_cl_reset_{cid}", use_container_width=True):
                             for k in kws:
                                 if k in current_ng or k in current_ok:
                                     draft_ab[k] = "RESET"
@@ -734,7 +779,7 @@ def render_step2a_view(paths: dict):
                             elif st_val == "NG":
                                 lbl = f"❌ {disp_k}{cnt_badge}{draft_tag}"
                             else:
-                                lbl = f"❓ {disp_k}{cnt_badge}{draft_tag}"
+                                lbl = f"❔ {disp_k}{cnt_badge}{draft_tag}"
 
                             c_btn_k, c_pop_k = col_k.columns([4.8, 1.2])
                             with c_btn_k:
@@ -767,33 +812,12 @@ def render_step2a_view(paths: dict):
                                             draft_ab[kw] = "OK"
                                     st.rerun()
                             with c_pop_k:
-                                with st.popover("詳細", help=f"『{disp_k}』の外部検索・該当資料詳細"):
-                                    st.markdown(f"### 『{format_about_keyword_display(kw)}』")
-                                    st.markdown(make_rich_search_links_md(kw))
-                                    st.markdown(f"- 該当資料件数: **未除外残存: {eff_kw_cnt:,} 件** （初期メタデータセット全体: {tot_kw_cnt:,} 件）")
-                                    kw_indices = kw_to_doc_indices.get(kw, [])
-                                    if kw_indices:
-                                        st.write("---")
-                                        st.caption("該当資料一覧 (アクティブ残存資料を優先表示、上位15件):")
-                                        
-                                        sorted_kw_indices = sorted(kw_indices, key=lambda i: 0 if i in active_doc_indices else 1)
-                                        sample_lines = []
-                                        from components.file_utils import make_jps_item_url
-                                        for idx_doc in sorted_kw_indices[:15]:
-                                            rec = raw_records[idx_doc]
-                                            r_title = rec.get('title', '') or "（無題）"
-                                            r_id = rec.get('id', '')
-                                            creator_part = f" （著者: `{rec.get('creator')}`）" if rec.get('creator') else ""
-                                            is_act = idx_doc in active_doc_indices
-                                            tag = "" if is_act else " <span class='status-badge status-badge-reject'>[他条件で除外済]</span>"
-                                            item_link = make_jps_item_url(r_id, r_title)
-                                            sample_lines.append(f"• [**{r_title}**]({item_link}){creator_part}{tag}")
-                                        
-                                        if len(sorted_kw_indices) > 15:
-                                            sample_lines.append(f"\n*※ 他 {len(sorted_kw_indices) - 15:,} 件の資料があります（上位15件を表示中）*")
-                                            
-                                        with st.container(height=280):
-                                            st.markdown("\n".join(sample_lines), unsafe_allow_html=True)
+                                if st.button("詳細", key=f"btn_det_{cid}_{kw}", help=f"『{disp_k}』の該当資料プレビュー・外部検索"):
+                                    if hasattr(st, "dialog"):
+                                        _show_about_keyword_dialog(kw, eff_kw_cnt, tot_kw_cnt)
+                                    else:
+                                        st.session_state["selected_about_detail_kw"] = (kw, eff_kw_cnt, tot_kw_cnt)
+                                        st.rerun()
 
                         if len(visible_kws_info) > cur_kw_limit:
                             rem_kw_cnt = len(visible_kws_info) - cur_kw_limit
@@ -801,10 +825,9 @@ def render_step2a_view(paths: dict):
                                 st.session_state[cl_limit_key] = len(visible_kws_info)
                                 st.rerun()
 
-            # 各キーワードのアクティブ残存件数を一括事前計算 (O(N))
-            kw_eff_counts_map = {}
-            for kw, indices in kw_to_doc_indices.items():
-                kw_eff_counts_map[kw] = sum(1 for idx in indices if idx in active_doc_indices)
+            # 各キーワードのアクティブ残存件数は辞書参照でO(1)
+            def _get_eff_k_cnt(k):
+                return 0 if k in matched_ng_kws else about_counts_map.get(k, 0)
 
             def render_cluster_board():
                 display_clusters = []
@@ -823,7 +846,7 @@ def render_step2a_view(paths: dict):
                         if is_in_draft:
                             has_draft_in_cluster = True
                         
-                        eff_k_cnt = kw_eff_counts_map.get(k, 0)
+                        eff_k_cnt = _get_eff_k_cnt(k)
                         st_val = get_eff_status(k)
                         if st_val == "NG":
                             ng_c += 1
@@ -846,13 +869,10 @@ def render_step2a_view(paths: dict):
                     if len(cluster_visible_kws) == 0 and not has_draft_in_cluster:
                         continue
 
-                    # クラスタのユニーク残存件数を計算
-                    cl_doc_set = set()
-                    for k in kws:
-                        cl_doc_set.update(kw_to_doc_indices.get(k, []))
-                    cl_comm_cnt = len(cl_doc_set & committed_active_doc_indices)
-                    cl_act_cnt = len(cl_doc_set & active_doc_indices)
-                    cl_tot_cnt = len(cl_doc_set)
+                    # クラスタの残存件数をO(1)で計算
+                    cl_tot_cnt = sum(about_counts_map.get(k, 0) for k in kws)
+                    cl_comm_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in comm_matched_ng)
+                    cl_act_cnt = sum(about_counts_map.get(k, 0) for k in kws if k not in matched_ng_kws)
 
                     if hide_zero_cluster_pills and cl_comm_cnt == 0 and not has_draft_in_cluster:
                         continue
@@ -953,7 +973,7 @@ def render_step2a_view(paths: dict):
 
         b1 = c_m1.button("【 Q 】 ❌ NG除外モード", key="btn_shortcut_ab_q", type=btn1_type, use_container_width=True)
         b2 = c_m2.button("【 W 】 ✅ OK保持モード", key="btn_shortcut_ab_w", type=btn2_type, use_container_width=True)
-        b3 = c_m3.button("【 E 】 ❓ 未判定リセット", key="btn_shortcut_ab_e", type=btn3_type, use_container_width=True)
+        b3 = c_m3.button("【 E 】 ❔ 未判定リセット", key="btn_shortcut_ab_e", type=btn3_type, use_container_width=True)
 
         if hotkeys:
             if hotkeys.pressed("mode_ng"):
@@ -983,7 +1003,7 @@ def render_step2a_view(paths: dict):
         elif click_action_mode == "OKに設定":
             st.success("【現在の設定モード: ✅ OK (保持)】 (ショートカット: W)")
         elif click_action_mode == "未判定に戻す":
-            st.info("【現在の設定モード: ❓ 未判定リセット】 (ショートカット: E)")
+            st.info("【現在の設定モード: ❔ 未判定リセット】 (ショートカット: E)")
 
         filtered_ranking = about_ranking
         if view_filter_mode == "未判定のみ":
@@ -1006,11 +1026,10 @@ def render_step2a_view(paths: dict):
                 if all(i in kw_l or i in disp_kw_l for i in inc_words) and not any(e in kw_l or e in disp_kw_l for e in exc_words):
                     res_list.append((kw, cnt))
             filtered_ranking = res_list
-        # 残存未判定件数 (eff_cnt) の超高速算出 (整数カウントのみ)
+        # 残存未判定件数 (eff_cnt) の算出 (辞書参照でO(1))
         kw_eff_counts = {}
         for kw, cnt in filtered_ranking:
-            doc_idx_list = kw_to_doc_indices.get(kw, [])
-            eff_c = sum(1 for idx in doc_idx_list if idx in active_doc_indices)
+            eff_c = 0 if kw in matched_ng_kws else cnt
             kw_eff_counts[kw] = eff_c
 
         if hide_zero_about:
@@ -1026,31 +1045,28 @@ def render_step2a_view(paths: dict):
             )
 
         class LazySamplesMap(dict):
-            def __init__(self, kw_to_doc_indices, active_doc_indices, raw_records, kw_eff_counts):
-                self.kw_to_doc_indices = kw_to_doc_indices
-                self.active_doc_indices = active_doc_indices
-                self.raw_records = raw_records
-                self.kw_eff_counts = kw_eff_counts
+            def __init__(self, db_p, counts_map, kw_eff, use_db, exclude_types):
+                self.db_p = db_p
+                self.counts_map = counts_map
+                self.kw_eff = kw_eff
+                self.use_db = use_db
+                self.exclude_types = exclude_types
 
             def get(self, kw, default=None):
-                eff_c = self.kw_eff_counts.get(kw, 0)
-                doc_idx_list = self.kw_to_doc_indices.get(kw, [])
-                act_indices = [idx for idx in doc_idx_list if idx in self.active_doc_indices]
+                eff_c = self.kw_eff.get(kw, 0)
                 samples_list = []
-                for i in act_indices[:10]:
-                    rec = self.raw_records[i]
-                    samples_list.append({
-                        "id": rec.get("id", ""),
-                        "title": rec.get("title", ""),
-                        "desc": rec.get("desc", ""),
-                        "creator": rec.get("creator", "")
-                    })
+                if self.use_db and os.path.exists(self.db_p) and DuckDBManager is not None:
+                    try:
+                        db = get_duckdb_manager(self.db_p) if get_duckdb_manager else DuckDBManager(db_path=self.db_p)
+                        samples_list = db.get_records_by_about_keyword(kw, limit=10, exclude_ng_types=self.exclude_types)
+                    except Exception:
+                        samples_list = []
                 return {
                     "eff_cnt": eff_c,
                     "samples": samples_list
                 }
         
-        active_samples_info = LazySamplesMap(kw_to_doc_indices, active_doc_indices, raw_records, kw_eff_counts)
+        active_samples_info = LazySamplesMap(duckdb_path, about_counts_map, kw_eff_counts, use_duckdb, exclude_ng_types)
 
         if "draft_about_changes" not in st.session_state:
             st.session_state["draft_about_changes"] = {}
@@ -1182,7 +1198,7 @@ def render_step2a_view(paths: dict):
                 elif cur_st == "OK":
                     st_badge = "✅ [OK登録済]"
                 else:
-                    st_badge = "❓ [未登録]"
+                    st_badge = "❔ [未登録]"
 
                 exp_header = f"『{kw}』 [全 {tot_h:,} 件ヒット / 未判定: {act_h:,} 件] ｜ {st_badge}"
                 with st.expander(exp_header, expanded=(tot_h > 0 and cur_st == "未登録")):

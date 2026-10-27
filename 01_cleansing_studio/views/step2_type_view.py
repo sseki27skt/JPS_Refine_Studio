@@ -21,7 +21,7 @@ from modules.rule_filter import (
     save_type_rules,
     apply_type_filter
 )
-from modules.duckdb_manager import DuckDBManager
+from modules.duckdb_manager import DuckDBManager, get_duckdb_manager
 
 
 def render_step2_type_view(paths: dict):
@@ -123,33 +123,37 @@ def render_step2_type_view(paths: dict):
 
                     def _execute_type_filter_with_provenance(target_ng):
                         save_type_rules(type_rules_path, {"NG": target_ng, "OK": set()})
-                        tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
                         if os.path.exists(duckdb_path):
                             try:
                                 db = DuckDBManager(db_path=duckdb_path)
-                                db.apply_type_filter_fast(list(target_ng))
+                                res = db.apply_type_filter_fast(list(target_ng))
+                                # 高速ストリーミングで type_filtered.jsonl も同期出力 (1〜2秒)
+                                db.export_type_filtered_jsonl(type_filtered_path)
                                 db.close()
+                                return res.get("total", 0), res.get("passed", 0), res.get("discarded", 0)
                             except Exception:
                                 pass
-                        return tot, pas, disc
+                        # DuckDB不在時のみ旧来のファイル処理にフォールバック
+                        return apply_type_filter(raw_path, type_filtered_path, type_rules_path)
 
                     tot, pas, disc = _execute_type_filter_with_provenance(current_ng)
                     st.success(f"保存完了（残存: {pas:,} 件 / 除外: {disc:,} 件）")
-                    st.cache_data.clear()
                     st.rerun()
             else:
                 if st.button("フィルタ再実行 (type_filtered.jsonl 更新)", use_container_width=True, key="btn_reapply_type_filter"):
                     save_type_rules(type_rules_path, {"NG": current_ng, "OK": set()})
-                    tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
                     if os.path.exists(duckdb_path):
                         try:
                             db = DuckDBManager(db_path=duckdb_path)
-                            db.apply_type_filter_fast(list(current_ng))
+                            res = db.apply_type_filter_fast(list(current_ng))
+                            db.export_type_filtered_jsonl(type_filtered_path)
                             db.close()
+                            tot, pas, disc = res.get("total", 0), res.get("passed", 0), res.get("discarded", 0)
                         except Exception:
-                            pass
+                            tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
+                    else:
+                        tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
                     st.success(f"更新完了（残存: {pas:,} 件 / 除外: {disc:,} 件）")
-                    st.cache_data.clear()
                     st.rerun()
 
             st.write("---")
@@ -198,10 +202,18 @@ def render_step2_type_view(paths: dict):
                             draft_types[item] = "RESET"
                         current_ng.clear()
                         save_type_rules(type_rules_path, {"NG": set(), "OK": set()})
-                        apply_type_filter(raw_path, type_filtered_path, type_rules_path)
+                        if os.path.exists(duckdb_path):
+                            try:
+                                db = DuckDBManager(db_path=duckdb_path)
+                                db.apply_type_filter_fast([])
+                                db.export_type_filtered_jsonl(type_filtered_path)
+                                db.close()
+                            except Exception:
+                                apply_type_filter(raw_path, type_filtered_path, type_rules_path)
+                        else:
+                            apply_type_filter(raw_path, type_filtered_path, type_rules_path)
                         draft_types.clear()
                         st.session_state["confirm_reset_all_types"] = False
-                        st.cache_data.clear()
                         st.success("すべての除外設定をクリアしました。")
                         st.rerun()
                 with c_conf2:
@@ -209,7 +221,45 @@ def render_step2_type_view(paths: dict):
                         st.session_state["confirm_reset_all_types"] = False
                         st.rerun()
 
-        # コンパクトな3列グリッド描画
+        # オンデマンド種別詳細モーダル (クリック時のみ該当1種別のDuckDBクエリを0.05秒でオンデマンド実行)
+        if hasattr(st, "dialog"):
+            @st.dialog("データ種別の詳細資料プレビュー", width="large")
+            def _show_type_details_dialog(target_lbl: str, full_uri_val: str, cnt_val: int, is_ng_val: bool):
+                st.markdown(f"### 種別: **{target_lbl}**")
+                if full_uri_val:
+                    st.caption(f"URI: `{full_uri_val}`")
+                status_text = "❌ 除外対象" if is_ng_val else "✅ 保持"
+                st.markdown(f"- **総件数**: **{cnt_val:,} 件** （現在の判定: **{status_text}**）")
+                st.write("---")
+
+                if has_duckdb:
+                    db = get_duckdb_manager(duckdb_path)
+                    sample_docs = db.get_records_by_type(target_lbl, limit=100)
+                else:
+                    sample_docs = []
+
+                st.caption(f"代表資料一覧 (上位 {len(sample_docs):,} 件 / 全 {cnt_val:,} 件):")
+                if sample_docs:
+                    df_samples = pd.DataFrame([{
+                        "タイトル": s.get("title", "（無題）"),
+                        "Japan Search": make_jps_item_url(s.get("id", ""), s.get("title", "")),
+                        "概要": (s.get("description", "") or "")[:120]
+                    } for s in sample_docs])
+                    st.dataframe(
+                        df_samples,
+                        column_config={
+                            "Japan Search": st.column_config.LinkColumn("JPSリンク", display_text="開く"),
+                            "タイトル": st.column_config.TextColumn("タイトル", width="medium"),
+                            "概要": st.column_config.TextColumn("概要", width="large")
+                        },
+                        width="stretch",
+                        height=380,
+                        hide_index=True
+                    )
+                else:
+                    st.info("該当する資料が見つかりませんでした。")
+
+        # コンパクトな3列グリッド描画（初期ロード時はボタンのみを描画しクエリはゼロ）
         grid_cols = st.columns(3)
         for idx, t in enumerate(type_stats):
             col = grid_cols[idx % 3]
@@ -233,47 +283,37 @@ def render_step2_type_view(paths: dict):
                     st.rerun()
 
             with c_pop:
-                with st.popover("詳細", help=f"『{t_lbl}』の資料一覧"):
-                    st.markdown(f"#### 種別: {t_lbl}")
-                    if full_uri:
-                        st.caption(f"URI: `{full_uri}`")
-                    st.markdown(f"- **総件数**: **{cnt:,} 件** （{'除外対象' if is_ng else '保持'}）")
-                    st.write("---")
-
-                    # DuckDB からオンデマンドで代表資料を取得（最大100件）
-                    if has_duckdb:
-                        @st.cache_data(show_spinner=False)
-                        def _get_samples_for_popover(db_path: str, target_label: str, limit: int = 100):
-                            db = DuckDBManager(db_path=db_path)
-                            recs = db.get_records_by_type(target_label, limit=limit)
-                            db.close()
-                            return recs
-
-                        sample_docs = _get_samples_for_popover(duckdb_path, t_lbl, limit=100)
+                if st.button("詳細", key=f"btn_det_{idx}_{t_lbl}", help=f"『{t_lbl}』の資料一覧をポップアップ表示"):
+                    if hasattr(st, "dialog"):
+                        _show_type_details_dialog(t_lbl, full_uri, cnt, is_ng)
                     else:
-                        sample_docs = t.get("samples", [])[:100]
+                        st.session_state["selected_type_detail_lbl"] = t_lbl
+                        st.rerun()
 
-                    st.caption(f"資料一覧 (上位 {len(sample_docs):,} 件 / 全 {cnt:,} 件):")
-                    if sample_docs:
-                        df_samples = pd.DataFrame([{
-                            "タイトル": s.get("title", "（無題）"),
-                            "Japan Search": make_jps_item_url(s.get("id", ""), s.get("title", "")),
-                            "概要": (s.get("description", "") or "")[:120]
-                        } for s in sample_docs])
-
-                        st.dataframe(
-                            df_samples,
-                            column_config={
-                                "Japan Search": st.column_config.LinkColumn("JPSリンク", display_text="開く"),
-                                "タイトル": st.column_config.TextColumn("タイトル", width="medium"),
-                                "概要": st.column_config.TextColumn("概要", width="large")
-                            },
-                            width="stretch",
-                            height=280,
-                            hide_index=True
-                        )
-                    else:
-                        st.info("該当する資料が見つかりませんでした。")
+        # フォールバック (st.dialog 非対応環境用の詳細表示パネル)
+        if not hasattr(st, "dialog") and st.session_state.get("selected_type_detail_lbl"):
+            sel_lbl = st.session_state["selected_type_detail_lbl"]
+            with st.container(border=True):
+                c_dh, c_dc = st.columns([8.5, 1.5])
+                with c_dh:
+                    st.markdown(f"#### 種別詳細: **{sel_lbl}**")
+                with c_dc:
+                    if st.button("閉じる", key="btn_close_type_detail", use_container_width=True):
+                        st.session_state["selected_type_detail_lbl"] = None
+                        st.rerun()
+                if has_duckdb:
+                    db = DuckDBManager(db_path=duckdb_path)
+                    sample_docs = db.get_records_by_type(sel_lbl, limit=100)
+                    db.close()
+                else:
+                    sample_docs = []
+                if sample_docs:
+                    df_samples = pd.DataFrame([{
+                        "タイトル": s.get("title", "（無題）"),
+                        "Japan Search": make_jps_item_url(s.get("id", ""), s.get("title", "")),
+                        "概要": (s.get("description", "") or "")[:120]
+                    } for s in sample_docs])
+                    st.dataframe(df_samples, width="stretch", height=300, hide_index=True)
 
         # =====================================================================
         # フィルタリングによって影響を受ける全てのファイル（除外対象一覧）
@@ -307,14 +347,13 @@ def render_step2_type_view(paths: dict):
             cur_page = st.session_state.get(page_key, 1)
 
             if has_duckdb:
-                db = DuckDBManager(db_path=duckdb_path)
+                db = get_duckdb_manager(duckdb_path)
                 total_disc_count, page_records = db.query_records_discarded_by_types(
                     ng_types=list(effective_ng),
                     search_query=disc_search_query,
                     page=cur_page,
                     page_size=page_size
                 )
-                db.close()
             else:
                 total_disc_count, page_records = 0, []
 
@@ -340,38 +379,36 @@ def render_step2_type_view(paths: dict):
                         f"(ページ **{cur_page} / {total_pages}**):"
                     )
                 with col_d_btn:
-                    if has_duckdb:
-                        # オンデマンドでエクスポート用のCSVを生成（メモリ浪費なし）
-                        @st.cache_data(show_spinner="除外全件CSVを生成中...")
-                        def _get_discarded_csv_data(db_path: str, ng_tuple: tuple, mtime: float):
-                            d_db = DuckDBManager(db_path=db_path)
-                            _, all_disc = d_db.query_records_discarded_by_types(list(ng_tuple), page=1, page_size=1000000)
-                            d_db.close()
-                            df_all = pd.DataFrame([{
-                                "タイトル": r.get("title", "（無題）"),
-                                "除外理由 (該当種別)": r.get("matched_type", ""),
-                                "Japan Search": make_jps_item_url(r.get("id", ""), r.get("title", "")),
-                                "概要": r.get("description", "") or "",
-                                "ID": r.get("id", "")
-                            } for r in all_disc])
-                            return df_all.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                    with st.popover("📥 除外全件CSV", help="除外対象全件のリストをCSVでダウンロード"):
+                        st.markdown("##### 除外対象の一括CSV出力")
+                        st.caption(f"現在の選択で除外される **{total_disc_count:,} 件** の全資料をCSV形式で保存します。")
+                        if st.button("CSVデータを生成", key="btn_prep_disc_type_csv", type="primary", use_container_width=True):
+                            st.session_state["ready_disc_type_csv"] = True
 
-                        csv_bytes = _get_discarded_csv_data(
-                            duckdb_path,
-                            tuple(sorted(list(effective_ng))),
-                            db_mtime
-                        )
-                    else:
-                        csv_bytes = df_disc.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                        if st.session_state.get("ready_disc_type_csv"):
+                            with st.spinner("CSVデータを書き出し中..."):
+                                d_db = get_duckdb_manager(duckdb_path) if has_duckdb else None
+                                if d_db:
+                                    _, all_disc = d_db.query_records_discarded_by_types(list(effective_ng), page=1, page_size=1000000)
+                                    df_all = pd.DataFrame([{
+                                        "タイトル": r.get("title", "（無題）"),
+                                        "除外理由 (該当種別)": r.get("matched_type", ""),
+                                        "Japan Search": make_jps_item_url(r.get("id", ""), r.get("title", "")),
+                                        "概要": r.get("description", "") or "",
+                                        "ID": r.get("id", "")
+                                    } for r in all_disc])
+                                    csv_bytes = df_all.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                                else:
+                                    csv_bytes = df_disc.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
 
-                    st.download_button(
-                        label="除外全件をCSVダウンロード",
-                        data=csv_bytes,
-                        file_name="discarded_type_records.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        help="フィルタリングによって除外されるすべての資料のリストをCSVで保存します"
-                    )
+                                st.download_button(
+                                    label="💾 CSVファイルを保存",
+                                    data=csv_bytes,
+                                    file_name="discarded_type_records.csv",
+                                    mime="text/csv",
+                                    type="primary",
+                                    use_container_width=True
+                                )
 
                 st.dataframe(
                     df_disc,

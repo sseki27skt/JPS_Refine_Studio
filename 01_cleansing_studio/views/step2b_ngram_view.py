@@ -20,6 +20,14 @@ try:
 except Exception:
     hotkeys = None
 
+try:
+    from modules.duckdb_manager import DuckDBManager
+except (ImportError, ValueError):
+    try:
+        from duckdb_manager import DuckDBManager
+    except ImportError:
+        DuckDBManager = None
+
 
 @st.cache_data(show_spinner=False)
 def load_filtered_titles(file_path, file_mtime):
@@ -166,7 +174,14 @@ def render_step2b_view(paths: dict):
         st.warning("対象データが存在しません。先に Step 1 で初期メタデータセットを取得してください。")
         st.stop()
 
-    os.makedirs(os.path.dirname(ngram_rules_path), exist_ok=True)
+    duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
+    if os.path.exists(duckdb_path) and not os.path.exists(type_filtered_path) and DuckDBManager is not None:
+        try:
+            db = DuckDBManager(db_path=duckdb_path)
+            db.export_type_filtered_jsonl(type_filtered_path)
+            db.close()
+        except Exception:
+            pass
 
     # --- 入力データソースの選択 ＆ 前段相互連携コントロール ---
     data_source_options = []
@@ -560,7 +575,7 @@ def render_step2b_view(paths: dict):
                     elif cur_st == "OK":
                         st_badge = "✅ [OK登録済]"
                     else:
-                        st_badge = "❓ [未登録]"
+                        st_badge = "❔ [未登録]"
 
                     exp_header = f"『{kw}』 [全 {tot_h:,} 件ヒット / 未判定: {act_h:,} 件] ｜ {st_badge}"
                     with st.expander(exp_header, expanded=(tot_h > 0 and cur_st == "未登録")):
@@ -637,7 +652,7 @@ def render_step2b_view(paths: dict):
             with col_o2:
                 c_mode_n = st.radio(
                     f"クリック時アクション (N={n_val}):", 
-                    options=["❌ [除外] NGに設定", "✅ [保持] OKに設定", "❓ 未判定に戻す"], 
+                    options=["❌ [除外] NGに設定", "✅ [保持] OKに設定", "❔ 未判定に戻す"], 
                     horizontal=True,
                     key=f"c_mode_n_{n_val}"
                 )
