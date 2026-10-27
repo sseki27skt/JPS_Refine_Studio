@@ -190,11 +190,12 @@ class DuckDBManager:
         titles = [row[0] for row in self.conn.execute("SELECT title FROM metadata_records WHERE title IS NOT NULL;").fetchall()]
         
         results = {}
+        cleaner_regex = re.compile(r'[\s\(\)（）\[\]【】\d]+')
         for n in range(min_n, max_n + 1):
             counter = Counter()
             for title in titles:
                 # 記号・数字・空白の正規化
-                clean_t = re.sub(r'[\s\(\)（）\[\]【】\d]+', '', title)
+                clean_t = cleaner_regex.sub('', title)
                 t_len = len(clean_t)
                 if t_len >= n:
                     for i in range(t_len - n + 1):
