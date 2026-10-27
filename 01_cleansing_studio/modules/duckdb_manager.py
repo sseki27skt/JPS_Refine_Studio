@@ -531,54 +531,146 @@ class DuckDBManager:
             "null_cnt": row[4] or 0
         }
 
-    def query_review_records(
+    def query_records(
         self,
-        filter_type: str = "すべて",
+        filter_status: str = "すべて",
         search_query: str = "",
+        stage: Optional[str] = None,
+        ng_types: Optional[List[str]] = None,
+        target_type: Optional[str] = None,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 50,
+        filter_type: Optional[str] = None,
+        filter_source: Optional[str] = None
     ) -> Tuple[int, List[Dict[str, Any]]]:
         """
-        査読画面用：サーバーサイド検索・フィルタリング・ページネーション
-        数万件のデータがあっても 0.002秒 で該当ページのレコードのみを返却
+        現在のフィルタ条件・検索キーワードに基づく「総件数カウント」と「指定ページ（50件単位、LIMIT/OFFSET）」を返すクエリ関数
         """
+        eff_filter = filter_type or filter_status or "すべて"
         where_clauses = ["1=1"]
         params = []
 
-        # 絞り込みフィルタ
-        if filter_type == "LLM判定不能 (null) データのみ":
-            where_clauses.append("(llm_evaluated = true AND llm_target IS NULL)")
-        elif filter_type == "現在『合格』のデータのみ":
+        # 1. 判定ステータスフィルタ
+        if eff_filter in ("現在『合格』のデータのみ", "合格", "OK"):
             where_clauses.append("coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格'")
-        elif filter_type == "現在『除外』のデータのみ":
+        elif eff_filter in ("現在『除外』のデータのみ", "除外", "NG"):
             where_clauses.append("coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '除外'")
-        elif filter_type == "LLM判定経由データのみ":
+        elif eff_filter in ("判定保留 (GREY)", "保留", "GREY", "判定保留群"):
+            where_clauses.append("(type_status IS NULL OR type_status != 'NG') AND final_decision = 'GREY'")
+        elif eff_filter in ("LLM判定不能 (null) データのみ", "判定不能 (null)のみ"):
+            where_clauses.append("(llm_evaluated = true AND llm_target IS NULL)")
+        elif eff_filter in ("適合 (true)のみ", "適合のみ"):
+            where_clauses.append("llm_target = true")
+        elif eff_filter in ("非適合 (false)のみ", "非適合のみ"):
+            where_clauses.append("llm_target = false")
+        elif eff_filter == "LLM判定経由データのみ":
             where_clauses.append("(matched_reason LIKE '%LLM判定%' AND matched_reason NOT LIKE '%LLMバイパス%')")
-        elif filter_type == "手動修正 (オーバーライド) データのみ":
+        elif eff_filter == "手動修正 (オーバーライド) データのみ":
             where_clauses.append("human_decision IS NOT NULL AND human_decision != (CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END)")
+        elif eff_filter in ("Type除外データのみ", "Type除外", "TYPE"):
+            where_clauses.append("type_status = 'NG'")
+        elif eff_filter in ("About除外データのみ", "RULE_ABOUT"):
+            where_clauses.append("about_status = 'NG' AND (type_status IS NULL OR type_status != 'NG')")
+        elif eff_filter in ("Ngram除外データのみ", "RULE_NGRAM"):
+            where_clauses.append("ngram_status = 'NG' AND (type_status IS NULL OR type_status != 'NG')")
+        elif eff_filter == "ルール適合パス (LLMバイパス)":
+            where_clauses.append("matched_reason LIKE '%[ルール合格]%'")
+        elif eff_filter == "Web情報補強 LLM判定":
+            where_clauses.append("matched_reason LIKE '%LLM判定%' AND external_info IS NOT NULL AND external_info != ''")
 
-        # 検索キーワード (タイトル / ID / 理由)
+        # 1-b. 判定ソース個別フィルタ
+        if filter_source == "Web情報補強 LLM判定":
+            where_clauses.append("(matched_reason LIKE '%LLM判定%' AND external_info IS NOT NULL AND external_info != '')")
+        elif filter_source == "ルール適合パス (LLMバイパス)":
+            where_clauses.append("matched_reason LIKE '%[ルール合格]%'")
+
+        # 2. ステージフィルタ
+        if stage:
+            if stage == "TYPE":
+                where_clauses.append("drop_stage = 'TYPE'")
+            else:
+                where_clauses.append("(drop_stage = ? OR adopted_stage = ?)")
+                params.extend([stage, stage])
+
+        # 3. 特定種別フィルタ
+        if target_type:
+            if target_type == "（未定義 / 種別なし）":
+                where_clauses.append("(type_list IS NULL OR len(type_list) = 0)")
+            else:
+                where_clauses.append("""
+                    EXISTS (
+                        SELECT 1 FROM unnest(metadata_records.type_list) AS t(val)
+                        WHERE val = ? OR split_part(split_part(val, '/', -1), '#', -1) = ?
+                    )
+                """)
+                params.extend([target_type, target_type])
+
+        # 4. 除外対象種別 (ng_types) フィルタ
+        has_temp_ng = False
+        if ng_types:
+            has_empty = "（未定義 / 種別なし）" in ng_types
+            pure_ng = [t for t in ng_types if t != "（未定義 / 種別なし）"]
+
+            if pure_ng or has_empty:
+                self.conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_query_ng (val VARCHAR);")
+                self.conn.execute("DELETE FROM temp_query_ng;")
+                if pure_ng:
+                    self.conn.executemany("INSERT INTO temp_query_ng VALUES (?);", [(t,) for t in pure_ng])
+                has_temp_ng = True
+
+                if has_empty and pure_ng:
+                    where_clauses.append("""
+                        (type_list IS NULL OR len(type_list) = 0 OR EXISTS (
+                            SELECT 1 FROM unnest(metadata_records.type_list) AS t(val)
+                            JOIN temp_query_ng qng ON (t.val = qng.val OR split_part(split_part(t.val, '/', -1), '#', -1) = qng.val)
+                        ))
+                    """)
+                elif has_empty:
+                    where_clauses.append("(type_list IS NULL OR len(type_list) = 0)")
+                elif pure_ng:
+                    where_clauses.append("""
+                        EXISTS (
+                            SELECT 1 FROM unnest(metadata_records.type_list) AS t(val)
+                            JOIN temp_query_ng qng ON (t.val = qng.val OR split_part(split_part(t.val, '/', -1), '#', -1) = qng.val)
+                        )
+                    """)
+
+        # 5. 検索キーワード (タイトル / ID / 説明 / 理由)
         if search_query and search_query.strip():
             sq = f"%{search_query.strip()}%"
-            where_clauses.append("(title ILIKE ? OR id ILIKE ? OR matched_reason ILIKE ? OR llm_reason ILIKE ?)")
-            params.extend([sq, sq, sq, sq])
+            where_clauses.append("(title ILIKE ? OR id ILIKE ? OR description ILIKE ? OR matched_reason ILIKE ? OR primary_reason ILIKE ? OR llm_reason ILIKE ?)")
+            params.extend([sq, sq, sq, sq, sq, sq])
 
         where_sql = " AND ".join(where_clauses)
 
-        # 1. 該当総件数のカウント
+        # 総件数カウント
         count_query = f"SELECT count(*) FROM metadata_records WHERE {where_sql};"
         total_count = self.conn.execute(count_query, params).fetchone()[0]
 
-        # 2. 該当ページのレコード取得
-        offset = max(0, (page - 1) * page_size)
+        # 指定ページのレコード取得 (LIMIT / OFFSET)
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        offset = (page - 1) * page_size
+
         fetch_query = f"""
             SELECT
                 id,
                 title,
+                description,
+                about_list,
+                type_list,
                 final_decision,
                 coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) AS cur_status,
                 human_decision,
                 matched_reason,
+                primary_reason,
+                type_status,
+                type_reason,
+                about_status,
+                about_reason,
+                ngram_status,
+                ngram_reason,
+                llm_status,
                 llm_target,
                 llm_reason,
                 external_info,
@@ -590,19 +682,42 @@ class DuckDBManager:
         """
         rows = self.conn.execute(fetch_query, params).fetchall()
 
+        if has_temp_ng:
+            try:
+                self.conn.execute("DROP TABLE IF EXISTS temp_query_ng;")
+            except Exception:
+                pass
+
         records = []
         for r in rows:
-            uid, title, fin_dec, cur_status, h_dec, matched_r, llm_tgt, llm_r, ext_info, raw_j = r
+            (uid, title, desc, ab_list, t_list, fin_dec, cur_status, h_dec,
+             matched_r, prim_r, t_stat, t_rsn, ab_stat, ab_rsn, ng_stat, ng_rsn,
+             llm_stat, llm_tgt, llm_r, ext_info, raw_j) = r
+
             auto_status = "合格" if fin_dec == "OK" else "除外"
             is_override = (h_dec is not None and h_dec != auto_status)
 
             records.append({
                 "id": uid,
                 "title": title or "無題資料",
+                "description": desc or "",
+                "about_list": ab_list or [],
+                "type_list": t_list or [],
+                "final_decision": fin_dec,
                 "status": auto_status,
                 "cur_status": cur_status,
+                "human_decision": h_dec,
                 "is_override": is_override,
-                "reasons": matched_r or "全ルール通過",
+                "matched_reason": matched_r or "",
+                "primary_reason": prim_r or "",
+                "reasons": prim_r or matched_r or "全ルール通過",
+                "type_status": t_stat,
+                "type_reason": t_rsn,
+                "about_status": ab_stat,
+                "about_reason": ab_rsn,
+                "ngram_status": ng_stat,
+                "ngram_reason": ng_rsn,
+                "llm_status": llm_stat,
                 "llm_target": llm_tgt,
                 "llm_reason": llm_r or "",
                 "external_info": ext_info or "",
@@ -610,6 +725,27 @@ class DuckDBManager:
             })
 
         return total_count, records
+
+    # エイリアス
+    query_paginated_records = query_records
+
+    def query_review_records(
+        self,
+        filter_type: str = "すべて",
+        search_query: str = "",
+        page: int = 1,
+        page_size: int = 50
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        査読画面用：サーバーサイド検索・フィルタリング・ページネーション
+        数万件のデータがあっても 0.002秒 で該当ページのレコードのみを返却
+        """
+        return self.query_records(
+            filter_status=filter_type,
+            search_query=search_query,
+            page=page,
+            page_size=page_size
+        )
 
     def set_human_decision(self, item_id: str, decision: str):
         """1件の判定手動オーバーライドを即時更新"""
@@ -816,79 +952,202 @@ class DuckDBManager:
         stats.extend(sorted(type_map.values(), key=lambda x: x["count"], reverse=True))
         return stats
 
+    def query_records_by_type(
+        self,
+        target_type: str,
+        search_query: str = "",
+        page: int = 1,
+        page_size: int = 50
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        指定された種別に属するレコードの総件数カウントと指定ページ取得（50件単位、LIMIT/OFFSET）
+        """
+        if not target_type:
+            return 0, []
+
+        where_conds = []
+        params = []
+        if target_type == "（未定義 / 種別なし）":
+            where_conds.append("(type_list IS NULL OR len(type_list) = 0)")
+        else:
+            where_conds.append("""
+                EXISTS (
+                    SELECT 1 FROM unnest(metadata_records.type_list) AS t(val)
+                    WHERE val = ? OR split_part(split_part(val, '/', -1), '#', -1) = ?
+                )
+            """)
+            params.extend([target_type, target_type])
+
+        if search_query and search_query.strip():
+            sq = f"%{search_query.strip()}%"
+            where_conds.append("(title ILIKE ? OR id ILIKE ? OR description ILIKE ?)")
+            params.extend([sq, sq, sq])
+
+        where_sql = " AND ".join(where_conds)
+        total_count = self.conn.execute(f"SELECT count(*) FROM metadata_records WHERE {where_sql};", params).fetchone()[0]
+
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        offset = (page - 1) * page_size
+
+        fetch_query = f"""
+            SELECT id, title, description, type_list
+            FROM metadata_records
+            WHERE {where_sql}
+            ORDER BY id
+            LIMIT {int(page_size)} OFFSET {int(offset)};
+        """
+        rows = self.conn.execute(fetch_query, params).fetchall()
+        records = [{
+            "id": r[0],
+            "title": r[1] or "（無題）",
+            "description": r[2] or "",
+            "type_list": r[3] or []
+        } for r in rows]
+
+        return total_count, records
+
     def get_records_by_type(self, target_type: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        指定された種別に属するレコード（資料）をオンデマンドで高速取得
+        指定された種別に属するレコード（資料）をオンデマンドで高速取得（後方互換対応）
         """
         if not target_type:
             return []
+        page_size = int(limit) if (limit and limit > 0) else 1000
+        _, records = self.query_records_by_type(target_type=target_type, page=1, page_size=page_size)
+        return records
 
-        if target_type == "（未定義 / 種別なし）":
-            query = "SELECT id, title, description, type_list FROM metadata_records WHERE type_list IS NULL OR len(type_list) = 0"
-            if limit and limit > 0:
-                query += f" LIMIT {int(limit)}"
-            rows = self.conn.execute(query).fetchall()
-            return [{"id": r[0], "title": r[1] or "（無題）", "description": r[2] or "", "type_list": []} for r in rows]
+    def query_records_discarded_by_types(
+        self,
+        ng_types: List[str],
+        search_query: str = "",
+        page: int = 1,
+        page_size: int = 50
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        除外対象種別（ng_types）によって除外されるレコードの総件数カウントと指定ページ取得（50件単位、LIMIT/OFFSET）
+        """
+        if not ng_types:
+            return 0, []
 
-        # 通常種別
-        rows = self.conn.execute("SELECT id, title, description, type_list FROM metadata_records WHERE type_list IS NOT NULL AND len(type_list) > 0;").fetchall()
-        matched = []
-        for uid, title, desc, t_list in rows:
-            is_hit = False
-            for t in t_list:
-                short_t = t.split("/")[-1].split("#")[-1]
-                if t == target_type or short_t == target_type:
-                    is_hit = True
-                    break
-            if is_hit:
-                matched.append({
-                    "id": uid,
-                    "title": title or "（無題）",
-                    "description": desc or "",
-                    "type_list": t_list
-                })
-                if limit and len(matched) >= limit:
-                    break
-        return matched
+        has_empty = "（未定義 / 種別なし）" in ng_types
+        pure_ng = [t for t in ng_types if t != "（未定義 / 種別なし）"]
+
+        self.conn.execute("CREATE TEMP TABLE IF NOT EXISTS temp_disc_types (val VARCHAR);")
+        self.conn.execute("DELETE FROM temp_disc_types;")
+        if pure_ng:
+            self.conn.executemany("INSERT INTO temp_disc_types VALUES (?);", [(t,) for t in pure_ng])
+
+        where_conds = []
+        if has_empty and pure_ng:
+            where_conds.append("""
+                (type_list IS NULL OR len(type_list) = 0 OR EXISTS (
+                    SELECT 1 FROM unnest(metadata_records.type_list) AS t(val)
+                    JOIN temp_disc_types dt ON (t.val = dt.val OR split_part(split_part(t.val, '/', -1), '#', -1) = dt.val)
+                ))
+            """)
+        elif has_empty:
+            where_conds.append("(type_list IS NULL OR len(type_list) = 0)")
+        elif pure_ng:
+            where_conds.append("""
+                EXISTS (
+                    SELECT 1 FROM unnest(metadata_records.type_list) AS t(val)
+                    JOIN temp_disc_types dt ON (t.val = dt.val OR split_part(split_part(t.val, '/', -1), '#', -1) = dt.val)
+                )
+            """)
+
+        params = []
+        if search_query and search_query.strip():
+            sq = f"%{search_query.strip()}%"
+            where_conds.append("(title ILIKE ? OR id ILIKE ? OR description ILIKE ?)")
+            params.extend([sq, sq, sq])
+
+        where_sql = " AND ".join(where_conds)
+
+        count_query = f"SELECT count(*) FROM metadata_records WHERE {where_sql};"
+        total_count = self.conn.execute(count_query, params).fetchone()[0]
+
+        page = max(1, int(page))
+        page_size = max(1, int(page_size))
+        offset = (page - 1) * page_size
+
+        if pure_ng:
+            fetch_query = f"""
+                SELECT
+                    id,
+                    title,
+                    description,
+                    type_list,
+                    CASE 
+                        WHEN type_list IS NULL OR len(type_list) = 0 THEN '（未定義 / 種別なし）'
+                        ELSE coalesce(
+                            (SELECT dt.val FROM unnest(metadata_records.type_list) AS t(val)
+                             JOIN temp_disc_types dt ON (t.val = dt.val OR split_part(split_part(t.val, '/', -1), '#', -1) = dt.val)
+                             LIMIT 1),
+                            'Type除外'
+                        )
+                    END AS matched_type
+                FROM metadata_records
+                WHERE {where_sql}
+                ORDER BY id
+                LIMIT {int(page_size)} OFFSET {int(offset)};
+            """
+        else:
+            fetch_query = f"""
+                SELECT
+                    id,
+                    title,
+                    description,
+                    type_list,
+                    '（未定義 / 種別なし）' AS matched_type
+                FROM metadata_records
+                WHERE {where_sql}
+                ORDER BY id
+                LIMIT {int(page_size)} OFFSET {int(offset)};
+            """
+
+        rows = self.conn.execute(fetch_query, params).fetchall()
+
+        try:
+            self.conn.execute("DROP TABLE IF EXISTS temp_disc_types;")
+        except Exception:
+            pass
+
+        records = [{
+            "id": r[0],
+            "title": r[1] or "（無題）",
+            "description": r[2] or "",
+            "type_list": r[3] or [],
+            "matched_type": r[4] or "Type除外"
+        } for r in rows]
+
+        return total_count, records
 
     def get_records_discarded_by_types(self, ng_types: List[str], limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """
-        除外対象種別（ng_types）によって影響を受けるすべてのレコード（除外される資料）を高速取得
+        除外対象種別（ng_types）によって影響を受けるすべてのレコード（除外される資料）を高速取得（後方互換対応）
         """
         if not ng_types:
             return []
+        page_size = int(limit) if (limit and limit > 0) else 1000000
+        _, records = self.query_records_discarded_by_types(ng_types, page=1, page_size=page_size)
+        return records
 
-        ng_set = set(ng_types)
-        rows = self.conn.execute("SELECT id, title, description, type_list FROM metadata_records;").fetchall()
-        matched = []
-
-        for uid, title, desc, t_list in rows:
-            hit_type = None
-            if not t_list:
-                if "（未定義 / 種別なし）" in ng_set:
-                    hit_type = "（未定義 / 種別なし）"
-            else:
-                for t in t_list:
-                    short_t = t.split("/")[-1].split("#")[-1]
-                    if t in ng_set:
-                        hit_type = t
-                        break
-                    elif short_t in ng_set:
-                        hit_type = short_t
-                        break
-
-            if hit_type:
-                matched.append({
-                    "id": uid,
-                    "title": title or "（無題）",
-                    "description": desc or "",
-                    "matched_type": hit_type,
-                    "type_list": t_list or []
-                })
-                if limit and len(matched) >= limit:
-                    break
-
-        return matched
+    def export_records_discarded_by_types_csv(self, output_csv_path: str, ng_types: List[str]) -> int:
+        """
+        除外種別に該当する全レコードをCSVへ直接高速エクスポート（メモリ消費ゼロ）
+        """
+        import pandas as pd
+        os.makedirs(os.path.dirname(os.path.abspath(output_csv_path)), exist_ok=True)
+        total_cnt, records = self.query_records_discarded_by_types(ng_types, page=1, page_size=1000000)
+        df = pd.DataFrame([{
+            "ID": r["id"],
+            "タイトル": r["title"],
+            "除外理由 (該当種別)": r["matched_type"],
+            "概要": r["description"]
+        } for r in records])
+        df.to_csv(output_csv_path, index=False, encoding='utf-8-sig')
+        return len(df)
 
     def export_complete_audit_trail_csv(self, output_csv_path: str) -> int:
         """

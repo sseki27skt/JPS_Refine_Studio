@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from components.file_utils import count_lines, safe_save_json
+from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation
 from modules.duckdb_manager import DuckDBManager
 from modules.sparql_collector import get_acquisition_manifest, DEFAULT_MANIFEST_FILE
 
@@ -49,7 +50,7 @@ flowchart TD
     A["【初期同定】<br>Japan Search SPARQL取得<br>(N = {total:,})"] --> B["【Stage 1: データ種別除外】<br>非該当 rdf:type の除外<br>(除外: {type_disc:,} 件)"]
     B --> C["【Stage 1 通過母集団】<br>(N = {type_pass:,})"]
     C --> D["【Stage 2: ルールベース判定】<br>About (NDC/NDLNA) ＆ タイトル語彙<br>(合致合格: {rule_ok:,} 件 / 除外: {rule_ng:,} 件)"]
-    D --> E["【Stage 3: LLM推論】<br>判定保留 (GREY) 群のセマンティック分類<br>(投入: {llm_total:,} 件 ➔ 合格: {llm_pass:,} 件 / 除外: {llm_disc:,} 件)"]
+    D --> E["【Stage 3: LLM推論】<br>判定保留 (GREY) 群のセマンティック分類<br>(投入: {llm_total:,} 件 -> 合格: {llm_pass:,} 件 / 除外: {llm_disc:,} 件)"]
     D -. 合格バイパス .-> F["【Stage 4: 専門家査読】<br>人手確認・手動オーバーライド<br>(修正: {human_ov:,} 件)"]
     E --> F
     F --> G["【最終採択データセット】<br>確定・採択対象資料メタデータ<br>(N = {final_ad:,} 件)"]
@@ -82,6 +83,14 @@ def render_step3_view(paths: dict):
     """Step 5 画面の描画"""
     st.title("Step 5: データエクスポート ＆ 再現性・監査パッケージ生成")
     st.markdown("精緻化された確定メタデータを検索ポータル（`02_search_viewer`）用JSON形式へ構造化出力するとともに、**論文・成果公開用の完全追跡データ（Audit Trail CSV）およびPRISMAフローレポート**を一括生成します。")
+
+    render_guide_card(
+        step_num="Step 5",
+        step_title="データエクスポート ＆ 再現性・監査パッケージ生成",
+        purpose="確定した研究用メタデータを検索ビューア用形式（JSON/CSV）で出力し、全件追跡CSVおよびPRISMAフローレポートを生成します。",
+        impact="公開用データセットおよび学術論文の再現性・監査パッケージが一括生成されます。",
+        condition="エクスポートを実行し、生成された成果物ファイルをダウンロードまたは検索ビューアで確認すること。"
+    )
 
     verified_jsonl_path = paths['PATH_VERIFIED_JSONL']
     llm_judgments_path = paths['PATH_LLM_JUDGMENTS']
@@ -127,7 +136,7 @@ def render_step3_view(paths: dict):
     # =========================================================================
     if prisma_stats and prisma_stats.get("total_records", 0) > 0:
         with st.container(border=True):
-            st.markdown("#### 📊 系統的レビュー（PRISMA準拠）プロセス概要")
+            st.markdown("#### 系統的レビュー（PRISMA準拠）プロセス概要")
             tot = prisma_stats["total_records"]
             ad = prisma_stats["final_adopted"]
             disc = prisma_stats["final_discarded"]
@@ -150,7 +159,7 @@ def render_step3_view(paths: dict):
     # =========================================================================
     # 2. 一括エクスポート実行ボタン
     # =========================================================================
-    if st.button("🚀 学術研究パッケージ（検索用JSON ＆ 全件追跡CSV ＆ PRISMAレポート）の一括生成・出力", type="primary", use_container_width=True):
+    if st.button("学術研究パッケージ（検索用JSON ＆ 全件追跡CSV ＆ PRISMAレポート）の一括生成・出力", type="primary", use_container_width=True):
         records = []
         viewer_records = []
 
@@ -261,7 +270,11 @@ def render_step3_view(paths: dict):
         df_export = pd.DataFrame(viewer_records)
         df_export.to_csv(path_export_csv, index=False, encoding='utf-8-sig')
 
-        st.success(f"🎉 学術パッケージの出力がすべて完了しました！全 {len(viewer_records):,} 件の確定資料を `{export_json_path}` および `{path_export_csv}` に生成しました。")
+        render_summary_banner(
+            "学術パッケージの一括出力が完了しました",
+            f"確定採択資料: {len(viewer_records):,} 件 ｜ 保存先: `{export_json_path}` および `{path_export_csv}`"
+        )
+        st.success(f"学術パッケージの出力が完了しました。全 {len(viewer_records):,} 件の確定資料を `{export_json_path}` および `{path_export_csv}` に生成しました。")
 
     if db:
         db.close()
@@ -271,7 +284,7 @@ def render_step3_view(paths: dict):
     # =========================================================================
     # 3. 成果物ダウンロードパネル
     # =========================================================================
-    st.subheader("📦 成果物 ＆ 再現性・監査パッケージのダウンロード")
+    st.subheader("成果物 ＆ 再現性・監査パッケージのダウンロード")
     st.markdown("論文の付録（Supplementary Materials）や研究リポジトリ登録に必要なデータパッケージを個別または一括で取得できます。")
 
     st.markdown("##### 1. 資料データセット成果物")
@@ -323,7 +336,7 @@ def render_step3_view(paths: dict):
         if os.path.exists(path_audit_csv):
             with open(path_audit_csv, 'rb') as f:
                 st.download_button(
-                    label="📋 complete_audit_trail.csv (全件追跡)",
+                    label="complete_audit_trail.csv (全件追跡)",
                     data=f,
                     file_name="complete_audit_trail.csv",
                     mime="text/csv",
@@ -336,7 +349,7 @@ def render_step3_view(paths: dict):
         if os.path.exists(path_prisma_md):
             with open(path_prisma_md, 'rb') as f:
                 st.download_button(
-                    label="📊 prisma_flow_report.md (PRISMAレポート)",
+                    label="prisma_flow_report.md (PRISMAレポート)",
                     data=f,
                     file_name="prisma_flow_report.md",
                     mime="text/markdown",
@@ -349,7 +362,7 @@ def render_step3_view(paths: dict):
         if os.path.exists(manifest_path):
             with open(manifest_path, 'rb') as f:
                 st.download_button(
-                    label="⚙️ acquisition_manifest.json (取得レシピ)",
+                    label="acquisition_manifest.json (取得レシピ)",
                     data=f,
                     file_name="acquisition_manifest.json",
                     mime="application/json",
@@ -357,4 +370,11 @@ def render_step3_view(paths: dict):
                 )
         else:
             st.button("acquisition_manifest.json (未出力)", disabled=True, use_container_width=True)
+
+    # 最下部ナビゲーション
+    render_step_navigation(
+        prev_choice="Step 4: 専門家による最終査読・手動オーバーライド",
+        next_choice="ダッシュボード",
+        next_label="ダッシュボードへ戻る"
+    )
 

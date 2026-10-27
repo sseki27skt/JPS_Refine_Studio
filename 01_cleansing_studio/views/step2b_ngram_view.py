@@ -12,6 +12,7 @@ import streamlit as st
 
 from components.file_utils import safe_save_json, make_rich_search_links_md
 from components.pill_board import render_pill_board
+from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation
 from modules.ngram_filter import extract_ngrams_from_jsonl, run_ngram_filter, clean_title_text
 
 try:
@@ -144,7 +145,15 @@ def build_expanded_ngram_rules(ng_set, ok_set, all_ngram_dict=None):
 def render_step2b_view(paths: dict):
     """Step 2-C 画面の描画"""
     st.title("Step 2-C: タイトル語彙・文字列パターン（N-Gram / 任意キーワード）分析・除外")
-    st.markdown("資料タイトルに含まれる頻出語彙（N=2〜9のN-Gram部分文字列）の集計・抽出に加え、任意の文字列・キーワードを指定した除外（🚫 NG）および合格確定（✅ OK: LLMスキップ）ルールの作成を行います。")
+    st.markdown("資料タイトルに含まれる頻出語彙（N=2〜9のN-Gram部分文字列）の集計・抽出に加え、任意の文字列・キーワードを指定した除外（NG）および合格確定（OK: LLMスキップ）ルールの作成を行います。")
+
+    render_guide_card(
+        step_num="Step 2-C",
+        step_title="タイトル語彙・文字列パターン分析・除外",
+        purpose="資料タイトルに出現する特徴的な語彙（N-gram接尾辞・複合語）に基づき、ノイズ資料をさらに絞り込みます。",
+        impact="「画譜」「系譜」「目録」等の無関係なタイトル語彙を持つレコードが除外（NG）または合格（OK）に振り分けられます。",
+        condition="タイトル語彙ルールを確定し、残った判定保留（Grey）群を次のLLMセマンティック推論に送る準備が整うこと。"
+    )
 
     about_filtered_path = paths['PATH_ABOUT_FILTERED']
     type_filtered_path = paths.get('PATH_TYPE_FILTERED', 'data/type_filtered.jsonl')
@@ -159,7 +168,7 @@ def render_step2b_view(paths: dict):
 
     os.makedirs(os.path.dirname(ngram_rules_path), exist_ok=True)
 
-    # --- 📁 入力データソースの選択 ＆ 前段相互連携コントロール ---
+    # --- 入力データソースの選択 ＆ 前段相互連携コントロール ---
     data_source_options = []
     if os.path.exists(about_filtered_path):
         data_source_options.append("Step 2-B (主題 about) 適用後データ (about_filtered.jsonl)")
@@ -170,7 +179,7 @@ def render_step2b_view(paths: dict):
     c_src1, c_src2 = st.columns([3, 2])
     with c_src1:
         chosen_source = st.selectbox(
-            "📁 分析対象データソース:",
+            "分析対象データソース:",
             options=data_source_options,
             index=0,
             help="前段で除外されたデータ種別や主題ノイズをあらかじめ省いた状態で Step 2-C の分析を行うことができます。",
@@ -189,11 +198,11 @@ def render_step2b_view(paths: dict):
 
     with c_src2:
         if "about_filtered" in chosen_source:
-            st.success("✅ Step 2-B の除外結果を反映したデータセットで分析中")
+            st.success("Step 2-B の除外結果を反映したデータセットで分析中")
         elif "type_filtered" in chosen_source:
-            st.success("✅ Step 2-A の除外結果を反映したデータセットで分析中")
+            st.success("Step 2-A の除外結果を反映したデータセットで分析中")
         else:
-            st.caption("ℹ️ 初期メタデータセット全件を対象に分析中")
+            st.caption("初期メタデータセット全件を対象に分析中")
 
     if "edited_ngram_ng" not in st.session_state:
         ngram_rules = {}
@@ -270,10 +279,10 @@ def render_step2b_view(paths: dict):
     # 右側: 固定コントロール ＆ アクションパネル
     # =========================================================================
     with col_ctrl:
-        st.markdown("### 🎛️ コントロール ＆ 進捗")
+        st.markdown("### コントロール ＆ 進捗")
 
         # 1. 絞り込み進捗メトリクス
-        st.markdown("##### 📊 N-Gram 絞り込み進捗")
+        st.markdown("##### N-Gram 絞り込み進捗")
         st.metric("About通過後レコード", f"{total_input_records:,} 件")
         st.metric(
             "N-Gram 除外対象 (削ぎ落とし)", 
@@ -294,18 +303,18 @@ def render_step2b_view(paths: dict):
         st.write("---")
 
         # 2. 仮選択の一括適用 ＆ 保存アクション
-        st.markdown("##### ⚡ ルール確定 ＆ 保存")
+        st.markdown("##### ルール確定 ＆ 保存")
         if total_draft_cnt > 0:
             st.warning(f"現在 **{total_draft_cnt} 件** のパターンが仮選択中です。")
-            if st.button(f"⚡ 仮設定 ({total_draft_cnt} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_all_ngram_draft_ctrl"):
+            if st.button(f"仮設定 ({total_draft_cnt} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_all_ngram_draft_ctrl"):
                 _apply_and_save_ngram_draft()
         else:
-            st.caption("✅ すべてのルールが保存済みです。ピルをクリックすると仮選択され、確定ボタンが表示されます。")
+            st.caption("すべてのルールが保存済みです。ピルをクリックすると仮選択され、確定ボタンが表示されます。")
 
         st.write("---")
 
         # 3. フィルタ適用実行
-        st.markdown("##### 🚀 フィルタ適用実行")
+        st.markdown("##### フィルタ適用実行")
         if st.button("N-Gram フィルタを実行する", type="primary", use_container_width=True, key="btn_run_ngram_filter_ctrl"):
             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
             safe_save_json(save_dict, ngram_rules_path)
@@ -316,8 +325,8 @@ def render_step2b_view(paths: dict):
         st.write("---")
 
         # 4. 初期化
-        with st.popover("🗑️ ルール全初期化", help="N-Gramルールを初期化"):
-            st.warning("N-Gram ルール (`ngram_rules.json`) を全初期化しますか？")
+        with st.popover("ルール全初期化", help="N-Gramルールを初期化"):
+            st.warning("N-Gram ルール (ngram_rules.json) を全初期化しますか？")
             st.caption("登録済みの全 N-gram NG / OK パターンが消去されます。")
             if st.button("確定して初期化を実行", type="primary", use_container_width=True, key="btn_confirm_reset_ngram_ctrl"):
                 st.session_state["edited_ngram_ng"] = set()
@@ -343,16 +352,16 @@ def render_step2b_view(paths: dict):
     # =========================================================================
     with col_main:
         tab_search, tab_ngram_board, tab_rules = st.tabs([
-            "🎯 タイトルキーワード検索 ＆ 一括除外",
-            "🧩 頻出 N-Gram パターン分析 (N=2〜9)",
-            f"📋 登録済ルール ({len(ngram_ng)} NG / {len(ngram_ok)} OK)"
+            "タイトルキーワード検索 ＆ 一括除外",
+            "頻出 N-Gram パターン分析 (N=2〜9)",
+            f"登録済ルール ({len(ngram_ng)} NG / {len(ngram_ok)} OK)"
         ])
 
         # ---------------------------------------------------------------------
         # TAB 1: タイトルキーワード検索 ＆ 一括除外 (単語検索・複数一括の両対応)
         # ---------------------------------------------------------------------
         with tab_search:
-            st.markdown("### 🎯 タイトルキーワード検索 ＆ 一括除外・保持指定")
+            st.markdown("### タイトルキーワード検索 ＆ 一括除外・保持指定")
             st.caption("除外したい単語を1語で検索して該当資料を確認しながら判定することも、複数の単語（カンマや改行区切り）をまとめて一括登録することも可能です。")
 
             if "ngram_custom_txt_ver" not in st.session_state:
@@ -394,20 +403,20 @@ def render_step2b_view(paths: dict):
                 is_q_ng = kw_q in ngram_ng
                 is_q_ok = kw_q in ngram_ok
                 if is_q_ng:
-                    cur_status_badge = "🚫 [NGルール登録済]"
+                    cur_status_badge = "[NGルール登録済]"
                 elif is_q_ok:
-                    cur_status_badge = "✅ [OKルール登録済]"
+                    cur_status_badge = "[OKルール登録済]"
                 else:
-                    cur_status_badge = "❓ [未登録]"
+                    cur_status_badge = "[未登録]"
 
-                st.markdown(f"#### 📊 『**{kw_q}**』のヒット結果: 全 **{tot_hit:,}** 件 （未除外残存: **{act_hit:,}** 件） ｜ {cur_status_badge}")
+                st.markdown(f"#### 『**{kw_q}**』のヒット結果: 全 **{tot_hit:,}** 件 （未除外残存: **{act_hit:,}** 件） ｜ {cur_status_badge}")
                 st.markdown(make_rich_search_links_md(kw_q))
 
                 # アクションボタン
                 c_act_b1, c_act_b2, c_act_b3 = st.columns([2, 2, 1])
                 with c_act_b1:
                     if not is_q_ng:
-                        if st.button(f"🚫 『{kw_q}』を NG (除外) ルールに追加", type="primary", use_container_width=True, key=f"btn_add_uni_ng_{kw_q}"):
+                        if st.button(f"『{kw_q}』を NG (除外) ルールに追加", type="primary", use_container_width=True, key=f"btn_add_uni_ng_{kw_q}"):
                             ngram_ng.add(kw_q)
                             ngram_ok.discard(kw_q)
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
@@ -416,7 +425,7 @@ def render_step2b_view(paths: dict):
                             st.success(f"『{kw_q}』を NG ルールへ登録しました (ヒット {tot_hit:,} 件が除外対象になります)。")
                             st.rerun()
                     else:
-                        if st.button(f"↩️ 『{kw_q}』の NG 登録を解除", use_container_width=True, key=f"btn_rm_uni_ng_{kw_q}"):
+                        if st.button(f"『{kw_q}』の NG 登録を解除", use_container_width=True, key=f"btn_rm_uni_ng_{kw_q}"):
                             ngram_ng.discard(kw_q)
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                             safe_save_json(save_dict, ngram_rules_path)
@@ -426,7 +435,7 @@ def render_step2b_view(paths: dict):
 
                 with c_act_b2:
                     if not is_q_ok:
-                        if st.button(f"✅ 『{kw_q}』を OK (保持) ルールに追加", type="secondary", use_container_width=True, key=f"btn_add_uni_ok_{kw_q}"):
+                        if st.button(f"『{kw_q}』を OK (保持) ルールに追加", type="secondary", use_container_width=True, key=f"btn_add_uni_ok_{kw_q}"):
                             ngram_ok.add(kw_q)
                             ngram_ng.discard(kw_q)
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
@@ -435,7 +444,7 @@ def render_step2b_view(paths: dict):
                             st.success(f"『{kw_q}』を OK ルールへ登録しました。")
                             st.rerun()
                     else:
-                        if st.button(f"↩️ 『{kw_q}』の OK 登録を解除", use_container_width=True, key=f"btn_rm_uni_ok_{kw_q}"):
+                        if st.button(f"『{kw_q}』の OK 登録を解除", use_container_width=True, key=f"btn_rm_uni_ok_{kw_q}"):
                             ngram_ok.discard(kw_q)
                             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                             safe_save_json(save_dict, ngram_rules_path)
@@ -444,12 +453,12 @@ def render_step2b_view(paths: dict):
                             st.rerun()
 
                 with c_act_b3:
-                    if st.button("🔄 クリア", use_container_width=True, key="btn_clear_uni_single"):
+                    if st.button("クリア", use_container_width=True, key="btn_clear_uni_single"):
                         st.session_state["ngram_custom_txt_ver"] += 1
                         st.rerun()
 
                 st.write("---")
-                st.caption(f"📄 **該当タイトル一覧 (全 {tot_hit:,} 件をスクロール確認可能)**:")
+                st.caption("該当タイトル一覧 (全件スクロール確認可能):")
 
                 with st.container(height=450):
                     if not matched_records:
@@ -458,18 +467,18 @@ def render_step2b_view(paths: dict):
                     max_disp_d = min(tot_hit, 300)
                     for item in matched_records[:max_disp_d]:
                         raw_t = item["title"]
-                        act_tag = "" if item["is_active"] else " <span style='color:#888; font-size:0.75rem;'>[既除外]</span>"
+                        act_tag = "" if item["is_active"] else " <span class='status-badge status-badge-neutral'>[既除外]</span>"
                         
                         from components.file_utils import make_jps_keyword_url
                         hl_t = re.sub(
                             re.escape(kw_q), 
-                            f"<mark style='background:#ff4b4b; color:white; padding:1px 4px; border-radius:3px;'>{kw_q}</mark>", 
+                            f"<mark class='status-badge status-badge-reject'>{kw_q}</mark>", 
                             raw_t, 
                             flags=re.IGNORECASE
                         )
                         jps_link = make_jps_keyword_url(raw_t)
                         
-                        st.markdown(f"• [📖 **{hl_t}**]({jps_link}){act_tag}", unsafe_allow_html=True)
+                        st.markdown(f"• [**{hl_t}**]({jps_link}){act_tag}", unsafe_allow_html=True)
 
                     if tot_hit > max_disp_d:
                         st.caption(f"※ パフォーマンス保護のため現在上位 {max_disp_d} 件を表示しています。")
@@ -478,7 +487,7 @@ def render_step2b_view(paths: dict):
                 # -------------------------------------------------------------
                 # 【複数キーワード入力時】: 合算インパクト＆バッチ一括登録ビュー
                 # -------------------------------------------------------------
-                st.markdown(f"#### 🔍 入力された {len(parsed_custom_kws)} 件のキーワードのヒット検証")
+                st.markdown(f"#### 入力された {len(parsed_custom_kws)} 件のキーワードのヒット検証")
                 
                 kw_hit_stats = []
                 total_impact_docs = set()
@@ -512,7 +521,7 @@ def render_step2b_view(paths: dict):
 
                 c_a1, c_a2, c_a3 = st.columns([2, 2, 1])
                 with c_a1:
-                    if st.button(f"🚫 指定した {len(parsed_custom_kws)} 語を一括で NG (除外) ルールへ追加", type="primary", use_container_width=True, key="btn_apply_ngram_custom_ng"):
+                    if st.button(f"指定した {len(parsed_custom_kws)} 語を一括で NG (除外) ルールへ追加", type="primary", use_container_width=True, key="btn_apply_ngram_custom_ng"):
                         for kw in parsed_custom_kws:
                             ngram_ng.add(kw)
                             ngram_ok.discard(kw)
@@ -523,7 +532,7 @@ def render_step2b_view(paths: dict):
                         st.rerun()
 
                 with c_a2:
-                    if st.button(f"✅ 指定した {len(parsed_custom_kws)} 語を一括で OK (保持) ルールへ追加", type="secondary", use_container_width=True, key="btn_apply_ngram_custom_ok"):
+                    if st.button(f"指定した {len(parsed_custom_kws)} 語を一括で OK (保持) ルールへ追加", type="secondary", use_container_width=True, key="btn_apply_ngram_custom_ok"):
                         for kw in parsed_custom_kws:
                             ngram_ok.add(kw)
                             ngram_ng.discard(kw)
@@ -534,12 +543,12 @@ def render_step2b_view(paths: dict):
                         st.rerun()
 
                 with c_a3:
-                    if st.button("🔄 入力クリア", use_container_width=True, key="btn_clear_ngram_custom_input"):
+                    if st.button("入力クリア", use_container_width=True, key="btn_clear_ngram_custom_input"):
                         st.session_state["ngram_custom_txt_ver"] += 1
                         st.rerun()
 
                 st.write("---")
-                st.markdown("##### 📋 キーワード別ヒット詳細 ＆ 該当タイトル例")
+                st.markdown("##### キーワード別ヒット詳細 ＆ 該当タイトル例")
                 for stat in kw_hit_stats:
                     kw = stat["keyword"]
                     tot_h = stat["total_hits"]
@@ -547,20 +556,20 @@ def render_step2b_view(paths: dict):
                     cur_st = stat["status"]
                     
                     if cur_st == "NG":
-                        st_badge = "🚫 [NG登録済]"
+                        st_badge = "[NG登録済]"
                     elif cur_st == "OK":
-                        st_badge = "✅ [OK登録済]"
+                        st_badge = "[OK登録済]"
                     else:
-                        st_badge = "❓ [未登録]"
+                        st_badge = "[未登録]"
 
-                    exp_header = f"『{kw}』 ➔ 全 {tot_h:,} 件ヒット (未判定: {act_h:,} 件) ｜ {st_badge}"
+                    exp_header = f"『{kw}』 [全 {tot_h:,} 件ヒット / 未判定: {act_h:,} 件] ｜ {st_badge}"
                     with st.expander(exp_header, expanded=(tot_h > 0 and cur_st == "未登録")):
                         c_k1, c_k2 = st.columns([3, 1])
                         with c_k1:
                             st.markdown(make_rich_search_links_md(kw))
                         with c_k2:
                             if cur_st != "NG":
-                                if st.button(f"🚫 『{kw}』をNGに登録", key=f"btn_cust_ng_{kw}", use_container_width=True):
+                                if st.button(f"『{kw}』をNGに登録", key=f"btn_cust_ng_{kw}", use_container_width=True):
                                     ngram_ng.add(kw)
                                     ngram_ok.discard(kw)
                                     save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
@@ -568,7 +577,7 @@ def render_step2b_view(paths: dict):
                                     st.session_state["ngram_view_ver"] += 1
                                     st.rerun()
                             else:
-                                if st.button(f"↩️ 『{kw}』をNG解除", key=f"btn_cust_del_{kw}", use_container_width=True):
+                                if st.button(f"『{kw}』のNG解除", key=f"btn_cust_del_{kw}", use_container_width=True):
                                     ngram_ng.discard(kw)
                                     save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
                                     safe_save_json(save_dict, ngram_rules_path)
@@ -579,9 +588,9 @@ def render_step2b_view(paths: dict):
                         from components.file_utils import make_jps_keyword_url
                         for s in stat["samples"]:
                             jps_url = make_jps_keyword_url(s)
-                            st.markdown(f"- [📖 **{s}**]({jps_url})")
+                            st.markdown(f"- [**{s}**]({jps_url})")
             else:
-                st.info("👆 上記のテキストエリアに検索・除外したい単語を入力してください（1語なら該当資料のハイライト一覧、複数語なら合算インパクトが表示されます）。")
+                st.info("上記のテキストエリアに検索・除外したい単語を入力してください（1語なら該当資料のハイライト一覧、複数語なら合算インパクトが表示されます）。")
 
         # ---------------------------------------------------------------------
         # TAB 2: 頻出 N-Gram パターン分析ボード (オンデマンド高速実行)
@@ -614,7 +623,7 @@ def render_step2b_view(paths: dict):
                 with c_sub1:
                     sort_mode_n = st.radio(
                         "並び順:",
-                        options=["⚡ 未判定影響度順", "📊 全体出現頻度順"],
+                        options=["未判定影響度順", "全体出現頻度順"],
                         horizontal=True,
                         key=f"sort_mode_n_{n_val}",
                         help="未判定影響度順: 現在の未除外データの中で多くヒットする（フィルタリング影響の大きい）順に並べます。"
@@ -628,7 +637,7 @@ def render_step2b_view(paths: dict):
             with col_o2:
                 c_mode_n = st.radio(
                     f"クリック時アクション (N={n_val}):", 
-                    options=["🚫 NGに設定", "✅ OKに設定", "🔄 未判定に戻す"], 
+                    options=["[除外] NGに設定", "[保持] OKに設定", "未判定に戻す"], 
                     horizontal=True,
                     key=f"c_mode_n_{n_val}"
                 )
@@ -671,7 +680,7 @@ def render_step2b_view(paths: dict):
                     if active_n_samples_map.get(w, {}).get("eff_cnt", 0) > 0 or w in ngram_ng or w in ngram_ok
                 ]
 
-            if sort_mode_n == "⚡ 未判定影響度順":
+            if sort_mode_n == "未判定影響度順":
                 filtered_items.sort(
                     key=lambda item: (
                         active_n_samples_map.get(item[0], {}).get("eff_cnt", 0),
@@ -703,7 +712,7 @@ def render_step2b_view(paths: dict):
             st.markdown(f"### 現在の N-Gram NG / OK 登録ルール (NG: {len(ngram_ng)} 件 / OK: {len(ngram_ok)} 件)")
 
             # 冗長ルールの自動クリーンアップツール
-            with st.expander("🧹 登録ルールの最適化・冗長パターン一括クリーンアップ", expanded=False):
+            with st.expander("登録ルールの最適化・冗長パターン一括クリーンアップ", expanded=False):
                 st.caption("より短い親パターン（例:『楽譜』）が既にNGになっている場合、それを含む長い子パターン（例:『大日本楽譜集』）は重複しており不要です。これらを整理してルールファイルを大幅に軽量化・高速化します。")
                 if st.button("冗長な子パターンを自動整理してスリム化", key="btn_clean_redundant_rules"):
                     ng_sorted = sorted(list(ngram_ng), key=len)
@@ -723,9 +732,9 @@ def render_step2b_view(paths: dict):
 
             cn_manage_ng, cn_manage_ok = st.columns(2)
             with cn_manage_ng:
-                st.markdown(f"#### 🚫 除外(NG) N-gram パターン ({len(ngram_ng)} 件)")
+                st.markdown(f"#### 除外 (NG) N-gram パターン ({len(ngram_ng)} 件)")
                 if ngram_ng:
-                    search_ng = st.text_input("🔍 NGパターン内を検索:", key="txt_search_ng_pills", placeholder="絞り込みキーワードを入力...")
+                    search_ng = st.text_input("NGパターン内を検索:", key="txt_search_ng_pills", placeholder="絞り込みキーワードを入力...")
                     n_ng_sorted = sorted(list(ngram_ng))
                     if search_ng:
                         disp_ng_list = [w for w in n_ng_sorted if search_ng.lower() in w.lower()]
@@ -753,9 +762,9 @@ def render_step2b_view(paths: dict):
                     st.info("NG N-gram ルールは現在空です。")
 
             with cn_manage_ok:
-                st.markdown(f"#### ✅ 保持(OK) N-gram パターン ({len(ngram_ok)} 件)")
+                st.markdown(f"#### 保持 (OK) N-gram パターン ({len(ngram_ok)} 件)")
                 if ngram_ok:
-                    search_ok = st.text_input("🔍 OKパターン内を検索:", key="txt_search_ok_pills", placeholder="絞り込みキーワードを入力...")
+                    search_ok = st.text_input("OKパターン内を検索:", key="txt_search_ok_pills", placeholder="絞り込みキーワードを入力...")
                     n_ok_sorted = sorted(list(ngram_ok))
                     if search_ok:
                         disp_ok_list = [w for w in n_ok_sorted if search_ok.lower() in w.lower()]
@@ -781,4 +790,10 @@ def render_step2b_view(paths: dict):
                             st.warning("解除するパターンが選択されていません。")
                 else:
                     st.info("OK N-gram ルールは現在空です。")
+
+    # 最下部ナビゲーション
+    render_step_navigation(
+        prev_choice="Step 2-B: 主題 (schema:about) キーワード分析・判別",
+        next_choice="Step 3: LLMセマンティック適合判定 (判定保留群の分類)"
+    )
 

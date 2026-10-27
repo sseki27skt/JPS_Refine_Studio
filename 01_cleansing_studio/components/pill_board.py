@@ -54,24 +54,28 @@ def render_pill_board(
         c_stat, c_save = st.columns([3, 2])
         with c_stat:
             st.markdown(
-                f"<div style='padding: 6px 0;'><b>📋 表示中: {cur_limit:,} 件 ／ 全 {total_items:,} 件</b> "
-                f"<span style='color: #ff4b4b; font-weight: bold; margin-left: 8px;'>⚡ {draft_cnt} 件を仮選択中</span></div>",
+                f"<div class='facet-status-bar'>"
+                f"<span class='facet-counter'>表示中: {cur_limit:,} 件 ／ 全 {total_items:,} 件</span>"
+                f"<span class='facet-draft-indicator'>[仮選択: {draft_cnt} 件]</span>"
+                f"</div>",
                 unsafe_allow_html=True
             )
         with c_save:
             if st.button(
-                f"⚡ 仮設定 ({draft_cnt}件) を確定して保存", 
+                f"仮設定 ({draft_cnt}件) を保存", 
                 key=f"btn_inline_save_{page_session_key}", 
                 type="primary", 
                 use_container_width=True
             ):
                 on_confirm_save()
     else:
-        draft_tag = f" ｜ <span style='color: #ff4b4b; font-weight: bold;'>⚡ {draft_cnt} 件を仮選択中</span>" if draft_cnt > 0 else ""
+        draft_html = f"<span class='facet-draft-indicator'>[仮選択: {draft_cnt} 件]</span>" if draft_cnt > 0 else ""
         st.markdown(
-            f"<div style='padding: 4px 0 8px 0;'><b>📋 表示中: {cur_limit:,} 件 ／ 全 {total_items:,} 件</b> "
-            f"{draft_tag}"
-            f"<span style='color: #4CAF50; font-size: 0.85rem; margin-left: 8px;'>⚡ スクロールで自動追加読み込み</span></div>", 
+            f"<div class='facet-status-bar'>"
+            f"<span class='facet-counter'>表示中: {cur_limit:,} 件 ／ 全 {total_items:,} 件</span>"
+            f"{draft_html}"
+            f"<span class='facet-hint'>スクロールで追加読み込み</span>"
+            f"</div>", 
             unsafe_allow_html=True
         )
 
@@ -119,7 +123,7 @@ def render_pill_board(
             sample_lines = [f"• {t[:40]}..." if len(t) > 40 else f"• {t}" for t in sample_titles if t]
             sample_header = f"【『{disp_w}』 {cnt_str}】\n"
             if sample_lines:
-                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※クリックで切替 / 右の🔍で詳細"
+                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※クリックで切替 / 右の[詳細]でプレビュー"
             else:
                 tooltip_txt = sample_header + f"クリックで切替 / 現在アクション: 【{click_action_mode}】"
 
@@ -127,28 +131,28 @@ def render_pill_board(
             draft_status = draft_dict.get(w)
             if draft_status == "NG":
                 is_ng, is_ok = True, False
-                d_tag = " ⚡[仮NG]"
+                d_tag = " [仮:除外]"
             elif draft_status == "OK":
                 is_ng, is_ok = False, True
-                d_tag = " ⚡[仮OK]"
+                d_tag = " [仮:合格]"
             elif draft_status == "RESET":
                 is_ng, is_ok = False, False
-                d_tag = " 🔄[仮解除]"
+                d_tag = " [仮:解除]"
             else:
                 is_ng = w in current_ng
                 is_ok = w in current_ok
                 d_tag = ""
 
             if is_ng:
-                btn_label = f"🚫 {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"[除外] {disp_w} {cnt_str}{d_tag}"
             elif is_ok:
-                btn_label = f"✅ {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"[合格] {disp_w} {cnt_str}{d_tag}"
             elif parent_type == "NG":
-                btn_label = f"🚫 {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
+                btn_label = f"[親除外:{parent_word}] {disp_w} {cnt_str}{d_tag}"
             elif parent_type == "OK":
-                btn_label = f"✅ {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
+                btn_label = f"[親合格:{parent_word}] {disp_w} {cnt_str}{d_tag}"
             else:
-                btn_label = f"❓ {disp_w} {cnt_str}{d_tag}"
+                btn_label = f"[未判定] {disp_w} {cnt_str}{d_tag}"
 
             # トグル対応のクリックハンドラ
             def _handle_pill_click(word=w, mode_str=str(click_action_mode), cur_draft=draft_status, cur_ng=is_ng, cur_ok=is_ok):
@@ -167,17 +171,15 @@ def render_pill_board(
                 else:
                     # まだ仮設定がない場合
                     if target_status == "NG" and cur_ng:
-                        # 既にNGのものをクリックした場合は解除を仮設定
                         draft_dict[word] = "RESET"
                     elif target_status == "OK" and cur_ok:
-                        # 既にOKのものをクリックした場合は解除を仮設定
                         draft_dict[word] = "RESET"
                     else:
                         draft_dict[word] = target_status
 
-            c_btn, c_pop = col.columns([6, 1])
+            c_btn, c_pop = col.columns([5, 1])
             with c_btn:
-                # 仮選択中は目立つように primary 表示
+                # 仮選択中は primary 表示
                 btn_type = "primary" if draft_status in ("NG", "OK") else "secondary"
                 st.button(
                     btn_label, 
@@ -190,12 +192,13 @@ def render_pill_board(
                 )
 
             with c_pop:
-                with st.popover("🔍", help=f"『{w}』の外部検索・該当資料詳細"):
-                    st.markdown(f"### 🔍 『{w}』")
+                with st.popover("詳細", help=f"『{w}』の外部検索・該当資料詳細"):
+                    st.markdown(f"#### 『{w}』")
                     st.markdown(make_rich_search_links_md(w))
                     st.markdown(f"- **件数内訳**: 未判定 **{eff_c:,} 件** ／ 全 **{cnt:,} 件**")
                     if parent_type:
-                        st.info(f"親ルール継承: **{parent_type}** (親パターン: 『{parent_word}』)")
+                        parent_label = "除外" if parent_type == "NG" else "合格"
+                        st.info(f"親ルール継承: **{parent_label}** (親パターン: 『{parent_word}』)")
 
                     from components.file_utils import make_jps_item_url, make_jps_keyword_url
                     sample_md_parts = []
@@ -206,22 +209,22 @@ def render_pill_board(
                             s_creator = s.get("creator", "")
                             item_link = make_jps_item_url(s_id, s_title)
                             meta_info = f" `({s_creator})`" if s_creator else ""
-                            sample_md_parts.append(f"• [📖 **{s_title}**]({item_link}){meta_info}")
+                            sample_md_parts.append(f"• [**{s_title}**]({item_link}){meta_info}")
                         else:
                             s_str = str(s)
                             jps_search_url = make_jps_keyword_url(s_str)
-                            sample_md_parts.append(f"• [📖 **{s_str}**]({jps_search_url})")
+                            sample_md_parts.append(f"• [**{s_str}**]({jps_search_url})")
 
                     samples_text = "\n".join(sample_md_parts) if sample_md_parts else "該当する資料サンプルはありません。"
-                    st.markdown(f"📄 **該当資料例 (最大8件)**:\n\n{samples_text}")
+                    st.markdown(f"**該当資料例 (最大8件)**:\n\n{samples_text}")
 
     # ボトムの追加読み込みバー
     if cur_limit < total_items:
-        btn_txt = f"🔽 次の {items_per_page} 件を読み込む (現在 {cur_limit:,} 件 / 全 {total_items:,} 件)"
+        btn_txt = f"次の {items_per_page} 件を読み込む (現在 {cur_limit:,} 件 / 全 {total_items:,} 件)"
         trigger_btn_id = f"load_more_{page_session_key}_{cur_limit}"
         def _load_more():
             st.session_state[limit_key] = min(total_items, cur_limit + items_per_page)
         st.button(btn_txt, key=trigger_btn_id, type="secondary", use_container_width=True, on_click=_load_more)
     else:
-        st.caption(f"✅ 全 {total_items:,} 件のキーワードを表示完了しました。")
+        st.caption(f"全 {total_items:,} 件のキーワードを表示しました。")
 

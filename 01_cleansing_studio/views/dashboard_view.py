@@ -8,7 +8,7 @@ from components.file_utils import count_lines
 def render_dashboard_view(paths: dict):
     """ダッシュボード画面を描画"""
     st.markdown("""
-    <div class="hero-card">
+    <div class="cleanse-hero">
         <h1>JS-Refine Studio</h1>
         <p>人文学文化資源メタデータの網羅的抽出・多層ルールフィルタリング・LLMセマンティック適合判定・専門家査読を統合した精緻化システムです。</p>
     </div>
@@ -26,7 +26,7 @@ def render_dashboard_view(paths: dict):
         eta = st_data.get("eta_seconds")
         eta_str = f"約 {eta // 60}分 {eta % 60}秒" if (eta is not None and eta > 0) else "計算中..."
         st.info(
-            f"⚡ **バックグラウンドでメタデータ取得が進行中です**（ダッシュボード閲覧中も安全に継続されます）  \n"
+            f"**バックグラウンドでメタデータ取得が進行中です**（ダッシュボード閲覧中も安全に継続されます）  \n"
             f"・ステージ: `{stage_name}` | 進捗: **{proc:,} / {tot:,} 件** ({pct:.1f}%) | 残り推定時間: **{eta_str}**"
         )
         if tot > 0:
@@ -37,23 +37,19 @@ def render_dashboard_view(paths: dict):
 
     cols = st.columns(4)
     with cols[0]:
-        st.info("Step 1: メタデータ取得")
-        st.metric("初期メタデータセット", f"{count_lines(paths['PATH_RAW_METADATA']):,} 件")
+        st.metric("初期メタデータセット (Step 1)", f"{count_lines(paths['PATH_RAW_METADATA']):,} 件")
 
     with cols[1]:
-        st.warning("Step 2: ルールフィルタ")
         st.metric("2-A データ種別通過", f"{count_lines(paths.get('PATH_TYPE_FILTERED', 'data/type_filtered.jsonl')):,} 件")
         st.metric("2-B 主題キーワード通過", f"{count_lines(paths['PATH_ABOUT_FILTERED']):,} 件")
         st.metric("2-C タイトル文字列通過", f"{count_lines(paths['PATH_NGRAM_FILTERED']):,} 件")
 
     with cols[2]:
-        st.success("Step 3/4: LLM ＆ 査読")
         st.metric("Step 3: LLM適合判定数", f"{count_lines(paths['PATH_LLM_JUDGMENTS']):,} 件")
         st.metric("Step 4: 専門家確定数", f"{count_lines(paths['PATH_VERIFIED_JSONL']):,} 件")
 
     with cols[3]:
-        st.error("Step 5: エクスポート")
-        st.metric("統合検索用出力データ", f"{count_lines(paths['PATH_EXPORT_JSON']):,} 件")
+        st.metric("統合検索用出力データ (Step 5)", f"{count_lines(paths['PATH_EXPORT_JSON']):,} 件")
 
     st.write("---")
     st.subheader("ワークフロー概要")
@@ -69,15 +65,19 @@ def render_dashboard_view(paths: dict):
     5. **Step 5: 統合検索用データエクスポート** （ポータル用JSON/CSV出力）
     """)
 
+    if st.button("データ収集を開始する (Step 1 へ進む) ->", type="primary"):
+        st.session_state["main_menu_choice"] = "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得"
+        st.rerun()
+
     st.write("---")
     # --- 全データリセットセクション ---
-    st.subheader("⚠️ システム初期化・全作業リセット")
+    st.subheader("システム初期化・全作業リセット")
     
     with st.container(border=True):
         st.markdown("""
-        <div style="background-color: rgba(255, 75, 75, 0.1); border-left: 5px solid #ff4b4b; padding: 12px 16px; border-radius: 4px; margin-bottom: 12px;">
-            <h4 style="color: #ff4b4b; margin: 0 0 6px 0;">【警告】すべての作業データおよび設定ルールが完全に消去されます</h4>
-            <p style="margin: 0; font-size: 0.92rem; color: #dcdcdc; line-height: 1.5;">
+        <div class="warning-banner">
+            <h4>【警告】すべての作業データおよび設定ルールが完全に消去されます</h4>
+            <p>
                 この操作を実行すると、Japan Searchから収集した<b>初期メタデータセット（raw_metadata.jsonl）</b>、
                 Step 2の<b>全フィルタリング結果（Type/About/N-Gram/LLM判定結果）</b>、
                 構築された<b>除外・保持ルール設定（JSON）</b>、
@@ -94,7 +94,7 @@ def render_dashboard_view(paths: dict):
 
         c_rst1, c_rst2 = st.columns([1, 3])
         with c_rst1:
-            if st.button("🔥 すべてをリセットしてゼロからやり直す", type="primary", disabled=not confirm_reset, use_container_width=True):
+            if st.button("全データを初期化してリセット", type="primary", disabled=not confirm_reset, use_container_width=True):
                 import os
                 import time
 

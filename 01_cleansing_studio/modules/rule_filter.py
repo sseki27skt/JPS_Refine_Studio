@@ -358,7 +358,7 @@ def match_about_keyword(keyword: str, rule_target: str) -> bool:
     return False
 
 
-def run_about_filter(input_jsonl_path: str, rules_json_path: str, output_filtered_path: str, output_discarded_csv: str):
+def run_about_filter(input_jsonl_path: str, rules_json_path: str, output_filtered_path: str, output_discarded_csv: str, progress_callback=None):
     """
     schema:about キーワード分類ルールに基づいてデータをフィルタリング。
     NG優先で除外判定し、残存データを出力します。
@@ -385,9 +385,13 @@ def run_about_filter(input_jsonl_path: str, rules_json_path: str, output_filtere
     with open(input_jsonl_path, 'r', encoding='utf-8', errors='ignore') as in_f, \
          open(output_filtered_path, 'w', encoding='utf-8') as out_f:
 
+        total_read = 0
         for line in in_f:
             if not line.strip():
                 continue
+            total_read += 1
+            if progress_callback and total_read % 1000 == 0:
+                progress_callback(total_read)
             try:
                 item = json.loads(line)
             except Exception:
@@ -423,7 +427,8 @@ def run_about_filter(input_jsonl_path: str, rules_json_path: str, output_filtere
     if discarded_records:
         import pandas as pd
         df_disc = pd.DataFrame(discarded_records)
-        df_disc.to_csv(output_discarded_csv, index=False, encoding='utf-8-sig')
+    if progress_callback:
+        progress_callback(total_read)
 
     return passed_count, len(discarded_records)
 
@@ -743,7 +748,7 @@ def save_type_rules(rules_path: str, rules_dict: dict) -> bool:
         return False
 
 
-def apply_type_filter(input_jsonl_path: str, output_jsonl_path: str, type_rules_path: str) -> tuple:
+def apply_type_filter(input_jsonl_path: str, output_jsonl_path: str, type_rules_path: str, progress_callback=None) -> tuple:
     """
     type_rules.json の NG ルールに基づき、除外フィルタを適用して type_filtered.jsonl を生成します。
     戻り値: (total_count, passed_count, discarded_count)
@@ -765,6 +770,8 @@ def apply_type_filter(input_jsonl_path: str, output_jsonl_path: str, type_rules_
             if not line.strip():
                 continue
             total_cnt += 1
+            if progress_callback and total_cnt % 1000 == 0:
+                progress_callback(total_cnt)
             rec = json.loads(line)
             t_val = rec.get('type') or rec.get('rdf_type') or rec.get('rdf:type')
             extracted = extract_type_values(t_val)
@@ -784,6 +791,9 @@ def apply_type_filter(input_jsonl_path: str, output_jsonl_path: str, type_rules_
             else:
                 out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 passed_cnt += 1
+
+    if progress_callback:
+        progress_callback(total_cnt)
 
     return total_cnt, passed_cnt, discarded_cnt
 

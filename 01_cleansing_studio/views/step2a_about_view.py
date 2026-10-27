@@ -13,6 +13,7 @@ import streamlit.components.v1 as components
 
 from components.file_utils import safe_save_json, make_rich_search_links_md, make_rich_search_links
 from components.pill_board import render_pill_board
+from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation
 from modules.rule_filter import (
     run_about_filter,
     suggest_ng_keywords_with_llm,
@@ -83,7 +84,7 @@ def cluster_about_keywords(about_ranking_tuples: list):
         tag_lbl = f" [{lbl_str}]" if lbl_str else ""
         clusters.append({
             "cluster_id": f"cl_ndc_{cluster_idx}",
-            "name": f"🏷️ NDC分類: {base_ndc}{tag_lbl}",
+            "name": f"NDC分類: {base_ndc}{tag_lbl}",
             "keywords": [k for k, c in items_sorted],
             "total_count": total_cnt
         })
@@ -95,7 +96,7 @@ def cluster_about_keywords(about_ranking_tuples: list):
         total_cnt = sum(c for k, c in items_sorted)
         clusters.append({
             "cluster_id": f"cl_ndlna_{cluster_idx}",
-            "name": f"👥 NDLNA 典拠（人名・件名・団体名）",
+            "name": f"NDLNA 典拠（人名・件名・団体名）",
             "keywords": [k for k, c in items_sorted],
             "total_count": total_cnt
         })
@@ -154,7 +155,15 @@ def cluster_about_keywords(about_ranking_tuples: list):
 def render_step2a_view(paths: dict):
     """Step 2-B 画面の描画"""
     st.title("Step 2-B: 主題 (schema:about) キーワード分析・判別")
-    st.markdown("取得データに含まれる `schema:about` キーワード（NDC分類、NDLNA典拠、件名）を解析し、除外対象（🚫 NG）および合格確定（✅ OK: LLMスキップ）の判定を行います。")
+    st.markdown("取得データに含まれる `schema:about` キーワード（NDC分類、NDLNA典拠、件名）を解析し、除外対象（NG）および合格確定（OK: LLMスキップ）の判定を行います。")
+
+    render_guide_card(
+        step_num="Step 2-B",
+        step_title="主題 (schema:about) キーワード分析・判別",
+        purpose="NDC分類記号やNDLNA主題キーワードに基づき、確実な適合資料（合格）と明らかな無関係資料（除外）を高速判定します。",
+        impact="判定が確定したレコードは後続のLLM推論をスキップし、判定保留（Grey）群のみが次へ渡されます。",
+        condition="判定したい主題キーワードのルール（合格/除外）を設定・確定すること。"
+    )
 
     raw_metadata_path = paths['PATH_RAW_METADATA']
     about_rules_path = paths['PATH_ABOUT_RULES']
@@ -169,7 +178,7 @@ def render_step2a_view(paths: dict):
 
     os.makedirs(os.path.dirname(about_rules_path), exist_ok=True)
 
-    # --- 📁 入力データソースの選択 ＆ 前段/後段 相互連携コントロール ---
+    # --- 入力データソースの選択 ＆ 前段/後段 相互連携コントロール ---
     data_source_options = []
     if os.path.exists(type_filtered_path):
         data_source_options.append("Step 2-A (データ種別) 適用後データ (type_filtered.jsonl)")
@@ -180,7 +189,7 @@ def render_step2a_view(paths: dict):
     c_src1, c_src2 = st.columns([3, 2])
     with c_src1:
         chosen_source = st.selectbox(
-            "📁 分析対象データソース:",
+            "分析対象データソース:",
             options=data_source_options,
             index=0,
             help="前段で除外されたデータ種別やタイトルノイズをあらかじめ省いた状態で Step 2-B の分析を行うことができます。",
@@ -201,13 +210,13 @@ def render_step2a_view(paths: dict):
         link_ngram_rules = False
         if has_ngram_rules and "ngram_filtered" not in chosen_source:
             link_ngram_rules = st.toggle(
-                "⚡ Step 2-C (タイトルNGルール) をリアルタイム連動",
+                "Step 2-C (タイトルNGルール) をリアルタイム連動",
                 value=False,
                 help="Step 2-C で登録済みのタイトル除外ルールに一致するレコードを、Step 2-B のシミュレーション上でも除外扱いにして分析します。",
                 key="tgl_step2a_link_ngram"
             )
         elif "ngram_filtered" in chosen_source:
-            st.success("✅ Step 2-C の除外結果を反映したデータセットで分析中")
+            st.success("Step 2-C の除外結果を反映したデータセットで分析中")
 
     # Step 2-C タイトル NG ルールのロード (リアルタイム連動用)
     ngram_ng_set = set()
@@ -373,29 +382,29 @@ def render_step2a_view(paths: dict):
     # 右側: 固定コントロール ＆ アクションパネル
     # =========================================================================
     with col_ctrl:
-        st.markdown("### 🎛️ コントロール ＆ 進捗")
+        st.markdown("### コントロール ＆ 進捗")
         
         # 0. 個別ピルのクリック判定モード
-        st.markdown("##### 🎯 個別ピルのクリック判定モード")
+        st.markdown("##### 個別ピルのクリック判定モード")
         if "click_action_about_mode" not in st.session_state:
             st.session_state["click_action_about_mode"] = "NGに設定"
 
         click_mode_options = [
-            "🚫 NG (除外) に設定",
-            "✅ OK (保持) に設定",
-            "❓ 未判定に戻す",
-            "🔄 3段階トグル切替"
+            "[除外] NGに設定",
+            "[保持] OKに設定",
+            "[未判定] に戻す",
+            "トグル切替"
         ]
         mode_map = {
-            "🚫 NG (除外) に設定": "NGに設定",
-            "✅ OK (保持) に設定": "OKに設定",
-            "❓ 未判定に戻す": "未判定に戻す",
-            "🔄 3段階トグル切替": "トグル切替"
+            "[除外] NGに設定": "NGに設定",
+            "[保持] OKに設定": "OKに設定",
+            "[未判定] に戻す": "未判定に戻す",
+            "トグル切替": "トグル切替"
         }
         rev_mode_map = {v: k for k, v in mode_map.items()}
 
         cur_mode_val = st.session_state.get("click_action_about_mode", "NGに設定")
-        cur_mode_disp = rev_mode_map.get(cur_mode_val, "🚫 NG (除外) に設定")
+        cur_mode_disp = rev_mode_map.get(cur_mode_val, "[除外] NGに設定")
 
         chosen_disp = st.radio(
             "ピルクリック時の動作:",
@@ -405,12 +414,12 @@ def render_step2a_view(paths: dict):
             help="クラスタ内および単体ボードの各ピルをクリックした際の判定動作を設定します。"
         )
         st.session_state["click_action_about_mode"] = mode_map[chosen_disp]
-        st.caption("⌨️ キーボード: **Q** = NGモード ｜ **W** = OKモード ｜ **E** = リセット")
+        st.caption("キーボード: **Q** = NGモード ｜ **W** = OKモード ｜ **E** = リセット")
 
         st.write("---")
 
         # 1. 絞り込み進捗メトリクス
-        st.markdown("##### 📊 絞り込み進捗 (レコード件数)")
+        st.markdown("##### 絞り込み進捗 (レコード件数)")
         st.metric("初期メタデータセット", f"{total_records_cnt:,} 件")
         st.metric(
             "About 除外 (削ぎ落とし)", 
@@ -435,7 +444,7 @@ def render_step2a_view(paths: dict):
         st.write("---")
 
         # 2. 仮選択の一括適用 ＆ 保存アクション
-        st.markdown("##### ⚡ ルール確定 ＆ 保存")
+        st.markdown("##### ルール確定 ＆ 保存")
         if "draft_about_changes" not in st.session_state:
             st.session_state["draft_about_changes"] = {}
         draft_ab = st.session_state["draft_about_changes"]
@@ -465,15 +474,15 @@ def render_step2a_view(paths: dict):
 
         if draft_count > 0:
             st.warning(f"現在 **{draft_count} 件** のキーワードが仮選択中です。")
-            if st.button(f"⚡ 仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_cluster_draft_ctrl"):
+            if st.button(f"仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_apply_cluster_draft_ctrl"):
                 _apply_and_save_about_draft()
         else:
-            st.caption("✅ すべてのルールが保存済みです。クラスタやピルを選択すると確定ボタンが表示されます。")
+            st.caption("すべてのルールが保存済みです。クラスタやピルを選択すると確定ボタンが表示されます。")
 
         st.write("---")
 
         # 3. フィルタ適用実行
-        st.markdown("##### 🚀 フィルタ適用実行")
+        st.markdown("##### フィルタ適用実行")
         if st.button("About フィルタを実行する", type="primary", use_container_width=True, key="btn_run_about_filter_ctrl"):
             # 仮選択がある場合は自動コミット＆保存
             if len(draft_ab) > 0:
@@ -504,7 +513,7 @@ def render_step2a_view(paths: dict):
         st.write("---")
 
         # 4. 表示・操作オプション
-        st.markdown("##### ⚙️ 表示・操作設定")
+        st.markdown("##### 表示・操作設定")
         
         def _on_tgl_hide_classified():
             st.session_state["persistent_hide_classified"] = st.session_state["chk_hide_classified_clusters"]
@@ -532,8 +541,8 @@ def render_step2a_view(paths: dict):
         st.write("---")
 
         # 5. 初期化
-        with st.popover("🗑️ ルール全初期化", help="Aboutルールを初期化"):
-            st.warning("About ルール設定 (`about_rules.json`) を全初期化しますか？")
+        with st.popover("ルール全初期化", help="Aboutルールを初期化"):
+            st.warning("About ルール設定 (about_rules.json) を全初期化しますか？")
             st.caption("登録済みの NG / OK パターンがすべて消去されます。")
             if st.button("確定して初期化を実行", type="primary", use_container_width=True, key="btn_confirm_reset_about"):
                 st.session_state["edited_noise"] = set()
@@ -568,11 +577,11 @@ def render_step2a_view(paths: dict):
             return "UN"
 
         tab_cluster, tab_single, tab_custom, tab_llm, tab_manage = st.tabs([
-            "🧩 クラスタ一括判別 (推奨)",
-            "📊 単体キーワード判別ボード",
-            "🎯 自由入力一括指定 (カスタム)",
-            "🤖 LLMノイズ候補提案",
-            f"📋 登録済ルール管理 ({len(current_ng)} NG / {len(current_ok)} OK)"
+            "クラスタ一括判別 (推奨)",
+            "単体キーワード判別ボード",
+            "自由入力一括指定 (カスタム)",
+            "LLMノイズ候補提案",
+            f"登録済ルール管理 ({len(current_ng)} NG / {len(current_ok)} OK)"
         ])
 
         # ---------------------------------------------------------------------
@@ -605,7 +614,7 @@ def render_step2a_view(paths: dict):
                 cl_act_cnt = len(cl_doc_set & active_doc_indices)
 
                 # ピルの絞り込み（判定済み非表示 ＆ 残存0件非表示オプション）
-                # ★確定保存済みのピルのみ非表示にし、現在選択中の「仮設定ピル (kw in draft_ab)」は保存/確定まで表示を継続！
+                # [NOTE] 確定保存済みのピルのみ非表示にし、現在選択中の「仮設定ピル (kw in draft_ab)」は保存/確定まで表示を継続！
                 visible_kws_info = []
                 for kw in kws:
                     kw_indices = kw_to_doc_indices.get(kw, [])
@@ -628,7 +637,7 @@ def render_step2a_view(paths: dict):
                     return
 
                 kw_preview = ", ".join([format_about_keyword_display(k, 18) for k in kws[:4]]) + ("..." if len(kws) > 4 else "")
-                expander_title = f"{c['name']} ➔ [{status_badge}] （対象語句: {kw_preview} [{len(kws)}種類] ｜ 残存: {cl_act_cnt:,} 件 / 総 {cl_total_cnt:,} 件）"
+                expander_title = f"{c['name']} [{status_badge}] （対象語句: {kw_preview} [{len(kws)}種類] ｜ 残存: {cl_act_cnt:,} 件 / 総 {cl_total_cnt:,} 件）"
 
                 with st.expander(expander_title, expanded=True):
                     # 一括操作の対象キーワード選定（既存のOK/NG判定を保護）
@@ -678,13 +687,13 @@ def render_step2a_view(paths: dict):
                             cnt_badge = f" ({eff_kw_cnt:,}件)" if eff_kw_cnt != tot_kw_cnt else f" ({tot_kw_cnt:,}件)"
                             draft_tag = " [仮]" if is_in_draft else ""
                             if st_val == "OK":
-                                lbl = f"✅{draft_tag} {disp_k}{cnt_badge}"
+                                lbl = f"[合格]{draft_tag} {disp_k}{cnt_badge}"
                             elif st_val == "NG":
-                                lbl = f"🚫{draft_tag} {disp_k}{cnt_badge}"
+                                lbl = f"[除外]{draft_tag} {disp_k}{cnt_badge}"
                             else:
-                                lbl = f"❓{draft_tag} {disp_k}{cnt_badge}"
+                                lbl = f"[未]{draft_tag} {disp_k}{cnt_badge}"
 
-                            c_btn_k, c_pop_k = col_k.columns([5, 1])
+                            c_btn_k, c_pop_k = col_k.columns([4.8, 1.2])
                             with c_btn_k:
                                 if st.button(lbl, key=f"tgl_kw_{cid}_{kw}", use_container_width=True):
                                     cur_m = st.session_state.get("click_action_about_mode", "NGに設定")
@@ -703,14 +712,14 @@ def render_step2a_view(paths: dict):
                                             draft_ab[kw] = "OK"
                                     st.rerun()
                             with c_pop_k:
-                                with st.popover("🔍", help=f"『{disp_k}』の外部検索・該当資料詳細"):
-                                    st.markdown(f"### 🔍 『{format_about_keyword_display(kw)}』")
+                                with st.popover("詳細", help=f"『{disp_k}』の外部検索・該当資料詳細"):
+                                    st.markdown(f"### 『{format_about_keyword_display(kw)}』")
                                     st.markdown(make_rich_search_links_md(kw))
                                     st.markdown(f"- 該当資料件数: **未除外残存: {eff_kw_cnt:,} 件** （初期メタデータセット全体: {tot_kw_cnt:,} 件）")
                                     kw_indices = kw_to_doc_indices.get(kw, [])
                                     if kw_indices:
                                         st.write("---")
-                                        st.caption(f"📄 **該当資料一覧 (アクティブ残存資料を優先表示、上位15件)**:")
+                                        st.caption("該当資料一覧 (アクティブ残存資料を優先表示、上位15件):")
                                         
                                         sorted_kw_indices = sorted(kw_indices, key=lambda i: 0 if i in active_doc_indices else 1)
                                         sample_lines = []
@@ -721,9 +730,9 @@ def render_step2a_view(paths: dict):
                                             r_id = rec.get('id', '')
                                             creator_part = f" （著者: `{rec.get('creator')}`）" if rec.get('creator') else ""
                                             is_act = idx_doc in active_doc_indices
-                                            tag = "" if is_act else " <span style='color: #ff6b6b; font-size: 0.8rem;'>[🚫他条件で除外済]</span>"
+                                            tag = "" if is_act else " <span class='status-badge status-badge-reject'>[他条件で除外済]</span>"
                                             item_link = make_jps_item_url(r_id, r_title)
-                                            sample_lines.append(f"• [📖 **{r_title}**]({item_link}){creator_part}{tag}")
+                                            sample_lines.append(f"• [**{r_title}**]({item_link}){creator_part}{tag}")
                                         
                                         if len(sorted_kw_indices) > 15:
                                             sample_lines.append(f"\n*※ 他 {len(sorted_kw_indices) - 15:,} 件の資料があります（上位15件を表示中）*")
@@ -733,7 +742,7 @@ def render_step2a_view(paths: dict):
 
                         if len(visible_kws_info) > cur_kw_limit:
                             rem_kw_cnt = len(visible_kws_info) - cur_kw_limit
-                            if st.button(f"➕ クラスタ内の残りのキーワード ({rem_kw_cnt}件) をすべて表示", key=f"btn_more_kws_{cid}", use_container_width=True):
+                            if st.button(f"クラスタ内の残りのキーワード ({rem_kw_cnt}件) をすべて表示", key=f"btn_more_kws_{cid}", use_container_width=True):
                                 st.session_state[cl_limit_key] = len(visible_kws_info)
                                 st.rerun()
 
@@ -743,9 +752,9 @@ def render_step2a_view(paths: dict):
                         st.write("---")
                         c_save_col1, c_save_col2 = st.columns([3, 2])
                         with c_save_col1:
-                            st.info(f"📌 このクラスタ内に **{len(cluster_draft_kws)} 件** の仮設定があります。")
+                            st.info(f"このクラスタ内に **{len(cluster_draft_kws)} 件** の仮設定があります。")
                         with c_save_col2:
-                            if st.button(f"⚡ このクラスタを確定保存 ({len(cluster_draft_kws)}件)", key=f"btn_save_cl_card_{cid}", type="primary", use_container_width=True):
+                            if st.button(f"このクラスタを確定保存 ({len(cluster_draft_kws)}件)", key=f"btn_save_cl_card_{cid}", type="primary", use_container_width=True):
                                 for kw in cluster_draft_kws:
                                     status = draft_ab[kw]
                                     if status == "NG":
@@ -849,7 +858,7 @@ def render_step2a_view(paths: dict):
                 cur_cl_limit = min(total_display_clusters, max(int(clusters_per_page), int(st.session_state.get("cluster_visible_limit", clusters_per_page))))
                 st.session_state["cluster_visible_limit"] = cur_cl_limit
 
-                st.markdown(f"<div style='padding: 4px 0 8px 0;'><b>全 {total_display_clusters} クラスタ中 {cur_cl_limit} クラスタを表示中</b></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='facet-hint'>全 {total_display_clusters} クラスタ中 {cur_cl_limit} クラスタを表示中</div>", unsafe_allow_html=True)
 
                 page_clusters = display_clusters[:cur_cl_limit]
 
@@ -861,12 +870,12 @@ def render_step2a_view(paths: dict):
                 # ボトムの追加読み込み
                 if cur_cl_limit < total_display_clusters:
                     st.write("---")
-                    btn_cl_txt = f"🔽 次の {int(clusters_per_page)} クラスタを読み込む (現在 {cur_cl_limit} / 全 {total_display_clusters} クラスタ)"
+                    btn_cl_txt = f"次の {int(clusters_per_page)} クラスタを読み込む (現在 {cur_cl_limit} / 全 {total_display_clusters} クラスタ)"
                     if st.button(btn_cl_txt, key="btn_bot_more_clusters", type="secondary", use_container_width=True):
                         st.session_state["cluster_visible_limit"] = min(total_display_clusters, cur_cl_limit + int(clusters_per_page))
                         st.rerun()
                 else:
-                    st.caption(f"✅ 全 {total_display_clusters} クラスタを表示完了しました。")
+                    st.caption(f"全 {total_display_clusters} クラスタを表示完了しました。")
 
             render_cluster_board()
 
@@ -884,7 +893,7 @@ def render_step2a_view(paths: dict):
             with c_ab_s1:
                 sort_about_mode = st.radio(
                     "並び順:",
-                    options=["⚡ 未判定影響度順", "📊 全体出現頻度順"],
+                    options=["未判定影響度順", "全体出現頻度順"],
                     horizontal=True,
                     key="sort_about_mode",
                     help="未判定影響度順: 現在の未除外データの中で多くヒットする（フィルタリング影響の大きい）順に並べます。"
@@ -976,7 +985,7 @@ def render_step2a_view(paths: dict):
                 if kw_eff_counts.get(kw, 0) > 0 or kw in current_ng or kw in current_ok
             ]
 
-        if sort_about_mode == "⚡ 未判定影響度順":
+        if sort_about_mode == "未判定影響度順":
             filtered_ranking.sort(
                 key=lambda item: (kw_eff_counts.get(item[0], 0), item[1]),
                 reverse=True
@@ -1031,7 +1040,7 @@ def render_step2a_view(paths: dict):
         with c_hdr2:
             draft_count = len(draft_ab)
             if draft_count > 0:
-                if st.button(f"⚡ 仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_single_draft_apply"):
+                if st.button(f"仮設定 ({draft_count} 件) を確定して保存", type="primary", use_container_width=True, key="btn_single_draft_apply"):
                     _apply_and_save_about_draft()
                     st.info("現在仮選択中のキーワードはありません。")
 
@@ -1060,7 +1069,7 @@ def render_step2a_view(paths: dict):
         parsed_custom_ab = list(dict.fromkeys(parsed_custom_ab))
 
         if parsed_custom_ab:
-            st.markdown(f"#### 🔍 入力された {len(parsed_custom_ab)} 件のキーワードのヒット検証")
+            st.markdown(f"#### 入力された {len(parsed_custom_ab)} 件のキーワードのヒット検証")
             
             ab_hit_stats = []
             total_impact_docs = set()
@@ -1094,7 +1103,7 @@ def render_step2a_view(paths: dict):
 
             c_a1, c_a2, c_a3 = st.columns([2, 2, 1])
             with c_a1:
-                if st.button(f"🚫 指定した {len(parsed_custom_ab)} 語を一括で NG (除外) ルールへ追加", type="primary", use_container_width=True, key="btn_apply_about_custom_ng"):
+                if st.button(f"指定した {len(parsed_custom_ab)} 語を一括で NG (除外) ルールへ追加", type="primary", use_container_width=True, key="btn_apply_about_custom_ng"):
                     for kw in parsed_custom_ab:
                         current_ng.add(kw)
                         current_ok.discard(kw)
@@ -1108,7 +1117,7 @@ def render_step2a_view(paths: dict):
                     st.rerun()
 
             with c_a2:
-                if st.button(f"✅ 指定した {len(parsed_custom_ab)} 語を一括で OK (保持) ルールへ追加", type="secondary", use_container_width=True, key="btn_apply_about_custom_ok"):
+                if st.button(f"指定した {len(parsed_custom_ab)} 語を一括で OK (保持) ルールへ追加", type="secondary", use_container_width=True, key="btn_apply_about_custom_ok"):
                     for kw in parsed_custom_ab:
                         current_ok.add(kw)
                         current_ng.discard(kw)
@@ -1122,12 +1131,12 @@ def render_step2a_view(paths: dict):
                     st.rerun()
 
             with c_a3:
-                if st.button("🔄 入力クリア", use_container_width=True, key="btn_clear_about_custom_input"):
+                if st.button("入力クリア", use_container_width=True, key="btn_clear_about_custom_input"):
                     st.session_state["about_custom_txt_ver"] += 1
                     st.rerun()
 
             st.write("---")
-            st.markdown("##### 📋 キーワード別ヒット詳細 ＆ 該当資料例")
+            st.markdown("##### キーワード別ヒット詳細 ＆ 該当資料例")
             for stat in ab_hit_stats:
                 kw = stat["keyword"]
                 tot_h = stat["total_hits"]
@@ -1135,20 +1144,20 @@ def render_step2a_view(paths: dict):
                 cur_st = stat["status"]
                 
                 if cur_st == "NG":
-                    st_badge = "🚫 [NG登録済]"
+                    st_badge = "[NG登録済]"
                 elif cur_st == "OK":
-                    st_badge = "✅ [OK登録済]"
+                    st_badge = "[OK登録済]"
                 else:
-                    st_badge = "❓ [未登録]"
+                    st_badge = "[未登録]"
 
-                exp_header = f"『{kw}』 ➔ 全 {tot_h:,} 件ヒット (未判定: {act_h:,} 件) ｜ {st_badge}"
+                exp_header = f"『{kw}』 [全 {tot_h:,} 件ヒット / 未判定: {act_h:,} 件] ｜ {st_badge}"
                 with st.expander(exp_header, expanded=(tot_h > 0 and cur_st == "未登録")):
                     c_k1, c_k2 = st.columns([3, 1])
                     with c_k1:
                         st.markdown(make_rich_search_links_md(kw))
                     with c_k2:
                         if cur_st != "NG":
-                            if st.button(f"🚫 『{kw}』をNGに登録", key=f"btn_cust_ab_ng_{kw}", use_container_width=True):
+                            if st.button(f"『{kw}』をNGに登録", key=f"btn_cust_ab_ng_{kw}", use_container_width=True):
                                 current_ng.add(kw)
                                 current_ok.discard(kw)
                                 save_dict = {}
@@ -1159,7 +1168,7 @@ def render_step2a_view(paths: dict):
                                 st.cache_data.clear()
                                 st.rerun()
                         else:
-                            if st.button(f"↩️ 『{kw}』をNG解除", key=f"btn_cust_ab_del_{kw}", use_container_width=True):
+                            if st.button(f"『{kw}』のNG解除", key=f"btn_cust_ab_del_{kw}", use_container_width=True):
                                 current_ng.discard(kw)
                                 save_dict = {}
                                 for k in current_ng: save_dict[k] = "NG"
@@ -1177,7 +1186,7 @@ def render_step2a_view(paths: dict):
                         r_id = rec.get('id', '')
                         creator_part = f" ({rec.get('creator')})" if rec.get('creator') else ""
                         item_link = make_jps_item_url(r_id, r_title)
-                        st.markdown(f"• [📖 **{r_title}**]({item_link}){creator_part}")
+                        st.markdown(f"• [**{r_title}**]({item_link}){creator_part}")
         else:
             st.info("上記テキストエリアに除外したい主題単語（例: `工芸, 建築, 絵画, 彫刻, 陶芸, 写真`）を入力すると、一致する資料の検出と一括除外が行えます。")
 
@@ -1215,7 +1224,7 @@ def render_step2a_view(paths: dict):
         if "llm_about_suggs" in st.session_state:
             suggs = st.session_state["llm_about_suggs"]
             if suggs:
-                st.warning(f"🤖 LLMが抽出したノイズ候補 (全 {len(suggs)} 件)")
+                st.warning(f"LLMが抽出したノイズ候補 (全 {len(suggs)} 件)")
                 selected_suggs = st.multiselect("一括登録するキーワードの選択:", options=suggs, default=suggs, key="ms_llm_suggs")
                 if st.button("選択したノイズ候補を NG リストに追加", type="primary", key="btn_add_llm_suggs_ng"):
                     if selected_suggs:
@@ -1232,7 +1241,7 @@ def render_step2a_view(paths: dict):
             
             c_mng1, c_mng2 = st.columns(2)
             with c_mng1:
-                st.markdown(f"##### 🚫 登録済 NG (除外) ルール [{len(current_ng)} 件]")
+                st.markdown(f"##### 登録済 NG (除外) ルール [{len(current_ng)} 件]")
                 if current_ng:
                     ng_sorted = sorted(list(current_ng))
                     for kw in ng_sorted:
@@ -1241,7 +1250,7 @@ def render_step2a_view(paths: dict):
                         with c_w:
                             st.markdown(f"• **{disp_k}**")
                         with c_del:
-                            if st.button("🗑️ 削除", key=f"del_mng_ng_{kw}", use_container_width=True):
+                            if st.button("削除", key=f"del_mng_ng_{kw}", use_container_width=True):
                                 current_ng.discard(kw)
                                 save_dict = {k: "NG" for k in current_ng}
                                 save_dict.update({k: "OK" for k in current_ok})
@@ -1252,7 +1261,7 @@ def render_step2a_view(paths: dict):
                     st.info("登録済みの NG ルールはありません。")
 
             with c_mng2:
-                st.markdown(f"##### ✅ 登録済 OK (保持) ルール [{len(current_ok)} 件]")
+                st.markdown(f"##### 登録済 OK (保持) ルール [{len(current_ok)} 件]")
                 if current_ok:
                     ok_sorted = sorted(list(current_ok))
                     for kw in ok_sorted:
@@ -1261,7 +1270,7 @@ def render_step2a_view(paths: dict):
                         with c_w:
                             st.markdown(f"• **{disp_k}**")
                         with c_del:
-                            if st.button("🗑️ 削除", key=f"del_mng_ok_{kw}", use_container_width=True):
+                            if st.button("削除", key=f"del_mng_ok_{kw}", use_container_width=True):
                                 current_ok.discard(kw)
                                 save_dict = {k: "NG" for k in current_ng}
                                 save_dict.update({k: "OK" for k in current_ok})
@@ -1270,6 +1279,12 @@ def render_step2a_view(paths: dict):
                                 st.rerun()
                 else:
                     st.info("登録済みの OK ルールはありません。")
+
+    # 最下部ナビゲーション
+    render_step_navigation(
+        prev_choice="Step 2-A: データ種別 (rdf:type) 分析・除外",
+        next_choice="Step 2-C: タイトル語彙・文字列パターン分析・除外"
+    )
 
 
 

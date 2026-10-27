@@ -546,15 +546,14 @@ def test_workspace_and_snapshot_management():
         # 1. ワークスペースマネージャーの初期化
         wm = WorkspaceManager(project_root=tmp_root)
         workspaces = wm.list_workspaces()
-        assert len(workspaces) == 1
-        assert workspaces[0]["id"] == wm.DEFAULT_WORKSPACE_ID
-        print(f"[OK] WorkspaceManager initialized with default workspace: {workspaces[0]['id']}")
+        assert len(workspaces) == 0
+        print(f"[OK] WorkspaceManager initialized with clean workspace state: 0 workspaces")
 
         # 2. 新規ワークスペースの作成
         ws_ukiyoe = wm.create_workspace("ukiyoe_test", "浮世絵テストコレクション", "浮世絵研究用ワークスペース")
         assert ws_ukiyoe["id"] == "ukiyoe_test"
         all_ws = wm.list_workspaces()
-        assert len(all_ws) == 2
+        assert len(all_ws) == 1
         print(f"[OK] New workspace created: {ws_ukiyoe['id']} ({ws_ukiyoe['name']})")
 
         # 3. パス生成の検証
@@ -631,14 +630,14 @@ def test_workspace_and_snapshot_management():
 
         imported_ws = wm.import_package(zip_out, new_ws_id="imported_study", new_name="引き継ぎデータセット")
         assert imported_ws["id"] == "imported_study"
-        assert len(wm.list_workspaces()) == 3
+        assert len(wm.list_workspaces()) == 2
         print(f"[OK] Recipe bundle imported successfully as new workspace: {imported_ws['id']}")
 
         # 6. 削除
         wm.delete_workspace("imported_study")
         wm.delete_workspace("ukiyoe_test")
-        assert len(wm.list_workspaces()) == 1
-        print(f"[OK] Workspace deletion verified. Default workspace remains protected.")
+        assert len(wm.list_workspaces()) == 0
+        print(f"[OK] Workspace deletion verified. All test workspaces cleanly removed.")
 
 
 def test_clean_environment_and_duckdb_split():

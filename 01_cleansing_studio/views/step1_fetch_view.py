@@ -20,6 +20,7 @@ from modules.llm_query_expander import (
     ndc_labels_to_codes
 )
 import pandas as pd
+from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation
 from modules.sparql_collector import (
     fetch_uris_with_query_func, 
     build_metadata_for_uris,
@@ -179,6 +180,14 @@ def render_step1_view(paths: dict):
     st.title("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
     st.caption("対象テーマに基づき、LLMを用いて異体字・旧字体・関連用語を拡張し、再現率（Recall）を最大化する検索クエリを生成してJapan Searchよりデータを一括取得します。")
 
+    render_guide_card(
+        step_num="Step 1",
+        step_title="データ収集・深層グラフ構築",
+        purpose="研究テーマに応じたSPARQLクエリを自動生成し、Japan Searchから初期メタデータを取得・深層グラフ化します。",
+        impact="未加工の初期母集団データセット（JSONL / DuckDB）が新規作成されます。",
+        condition="SPARQLフェッチが完了し、初期母集団メタデータ（1件以上）が格納されること。"
+    )
+
     # --- 0. バックグラウンドジョブ状態監視バナー (忘却・誤操作・二重起動防止) ---
     status_file = paths.get("PATH_JOB_STATUS", DEFAULT_STATUS_FILE)
     job_status = get_job_status(status_file)
@@ -195,17 +204,17 @@ def render_step1_view(paths: dict):
         eta_str = f"約 {eta // 60}分 {eta % 60}秒" if (eta is not None and eta > 0) else "計算中..."
 
         st.info(
-            f"⚡ **バックグラウンドでメタデータ取得が進行中です**（ブラウザを閉じても安全に継続されます）  \n"
+            f"**バックグラウンドでメタデータ取得が進行中です**（ブラウザを閉じても安全に継続されます）  \n"
             f"・ステージ: `{stage_name}` | 進捗: **{proc:,} / {total:,} 件** ({pct:.1f}%) | "
             f"単回バッチ: **{bs} 件** | 残り推定時間: **{eta_str}**"
         )
         st.progress(min(1.0, proc / max(1, total)))
         c_act1, c_act2 = st.columns([1, 1])
         with c_act1:
-            if st.button("🔄 最新の進捗状況を再読み込み", key="btn_refresh_status", use_container_width=True):
+            if st.button("最新の進捗状況を更新", key="btn_refresh_status", use_container_width=True):
                 st.rerun()
         with c_act2:
-            if st.button("⏹️ 取得処理を安全に一時停止", key="btn_stop_job", type="secondary", use_container_width=True):
+            if st.button("取得処理を安全に一時停止", key="btn_stop_job", type="secondary", use_container_width=True):
                 request_job_stop(status_file)
                 st.warning("安全停止リクエストを送信しました。現在のバッチが完了次第、安全に中断されます。")
                 time.sleep(1)
@@ -215,13 +224,13 @@ def render_step1_view(paths: dict):
         total = job_status.get("total_target", 0)
         c_cmp1, c_cmp2 = st.columns([3, 1])
         with c_cmp1:
-            st.success(f"🎉 **メタデータ取得が完了しています**（全 {total:,} 件の書誌データが `{paths['PATH_RAW_METADATA']}` に安全に格納済みです）")
+            st.success(f"**メタデータ取得が完了しています**（全 {total:,} 件の書誌データが `{paths['PATH_RAW_METADATA']}` に安全に格納済みです）")
         with c_cmp2:
             def _goto_step2():
                 st.session_state["main_menu_choice"] = "Step 2-A: データ種別 (rdf:type) 分析・除外"
 
             st.button(
-                "➡️ Step 2-A へ進む",
+                "Step 2-A へ進む",
                 key="btn_goto_step2",
                 type="primary",
                 on_click=_goto_step2,
@@ -231,11 +240,11 @@ def render_step1_view(paths: dict):
     elif st_val == "STOPPED":
         proc = job_status.get("processed_count", 0)
         total = job_status.get("total_target", 0)
-        st.warning(f"⏸️ **取得処理は一時停止されています**（進捗: {proc:,} / {total:,} 件）。セクション3から「未取得分のみ再開」が可能です。")
+        st.warning(f"**取得処理は一時停止されています**（進捗: {proc:,} / {total:,} 件）。セクション3から「未取得分のみ再開」が可能です。")
         st.markdown("---")
     elif st_val == "FAILED":
         err = job_status.get("error_message", "不明なエラー")
-        st.error(f"❌ **前回実行時にエラーが発生しました**: `{err}`")
+        st.error(f"**前回実行時にエラーが発生しました**: `{err}`")
         st.markdown("---")
 
     # ワークスペース切替検知によるパラメータ初期化
@@ -427,7 +436,7 @@ def render_step1_view(paths: dict):
     # フォールバック通知表示
     if exp.get("is_fallback"):
         st.warning(
-            "⚠️ LLMへの接続ができなかったため、フォールバック（ルールベース生成）が適用されました。\n"
+            "LLMへの接続ができなかったため、フォールバック（ルールベース生成）が適用されました。\n"
             f"理由: `{exp.get('fallback_reason')}`"
         )
 
@@ -473,9 +482,9 @@ def render_step1_view(paths: dict):
         # 矛盾チェック（ホワイトリストとブラックリストの重複）
         overlap = set(wl_selected).intersection(set(bl_selected))
         if overlap:
-            st.error(f"⚠️ **指定の矛盾**: 以下のタイプがホワイトリストとブラックリストの両方に指定されています。正常に処理できないため、どちらかから削除してください。\n\n **重複項目**: {', '.join(overlap)}")
+            st.error(f"**指定の矛盾**: 以下のタイプがホワイトリストとブラックリストの両方に指定されています。正常に処理できないため、どちらかから削除してください。\n\n **重複項目**: {', '.join(overlap)}")
 
-        st.markdown("##### 📚 NDC (日本十進分類法) 分類コード指定")
+        st.markdown("##### NDC (日本十進分類法) 分類コード指定")
         
         # 包含NDC
         st.multiselect(
@@ -492,7 +501,7 @@ def render_step1_view(paths: dict):
 
         # 除外NDC (Blacklist)
         st.multiselect(
-            "🚫 除外 (Blacklist / ノイズ) NDC 二次区分選択リスト:",
+            "除外 (Blacklist / ノイズ) NDC 二次区分選択リスト:",
             options=list(NDC_MASTER.values()),
             help="指定したNDCを持つ資料は、タイトル等にキーワードが含まれていても SPARQL 検索時点でブロック・除外します",
             key="input_exclude_ndc_multiselect"
@@ -506,14 +515,14 @@ def render_step1_view(paths: dict):
         c_ndc_btn1, c_ndc_btn2 = st.columns(2)
         with c_ndc_btn1:
             st.button(
-                "➕ OKリスト以外を一括除外に追加",
+                "OKリスト以外を一括除外に追加",
                 on_click=_on_populate_exclude_ndc_from_complement,
                 help="包含(OK)リストに含まれていない全てのNDC二次区分（00〜99）を除外(Blacklist)リストに一括設定します",
                 use_container_width=True
             )
         with c_ndc_btn2:
             st.button(
-                "🗑️ 除外リストをクリア",
+                "除外リストをクリア",
                 on_click=_on_clear_exclude_ndc,
                 help="除外NDCリストを空にします",
                 use_container_width=True
@@ -558,7 +567,7 @@ def render_step1_view(paths: dict):
     c_lim1, c_lim2 = st.columns([1, 1])
     with c_lim1:
         is_unlimited = st.checkbox(
-            "🌐 全件網羅収集モード (上限なし・尽きるまで全件取得)", 
+            "全件網羅収集モード (上限なし・尽きるまで全件取得)", 
             value=True, 
             help="各クエリパターンに合致するすべての文化資源メタデータを、件数制限なく最後まで収集します（推奨・Recall 100%）。"
         )
@@ -571,11 +580,11 @@ def render_step1_view(paths: dict):
 
     c_opt1, c_opt2, c_opt3 = st.columns(3)
     with c_opt1:
-        run_bg = st.checkbox("🚀 バックグラウンド実行（推奨）", value=True, help="ブラウザを閉じてもバックグラウンドで安全に取得が継続されます。")
+        run_bg = st.checkbox("バックグラウンド実行（推奨）", value=True, help="ブラウザを閉じてもバックグラウンドで安全に取得が継続されます。")
     with c_opt2:
-        use_adapt = st.checkbox("⚡ 適応型レート制御", value=True, help="Japan Searchの応答速度や負荷を検知し、バッチサイズ（5〜30件）を自動伸縮します。")
+        use_adapt = st.checkbox("適応型レート制御", value=True, help="Japan Searchの応答速度や負荷を検知し、バッチサイズ（5〜30件）を自動伸縮します。")
     with c_opt3:
-        use_res = st.checkbox("🔄 中断からの再開（レジューム）", value=True, help="既に取得済みのレコードをスキップし、未取得の差分のみを取得します。")
+        use_res = st.checkbox("中断からの再開（レジューム）", value=True, help="既に取得済みのレコードをスキップし、未取得の差分のみを取得します。")
 
     # 既存の対象URIリストがある場合の直接再開ボタン
     target_uris_file = paths['PATH_TARGET_URIS']
@@ -584,7 +593,7 @@ def render_step1_view(paths: dict):
             df_existing_uris = pd.read_csv(target_uris_file)
             cnt_uris = len(df_existing_uris)
             if cnt_uris > 0:
-                if st.button(f"▶️ 保存済み対象リスト（{cnt_uris:,} 件）から未取得分のみバックグラウンド再開", type="secondary", use_container_width=True):
+                if st.button(f"保存済み対象リスト（{cnt_uris:,} 件）から未取得分のみバックグラウンド再開", type="secondary", use_container_width=True):
                     worker_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "run_fetch_worker.py")
                     worker_cmd = [
                         sys.executable,
@@ -609,16 +618,16 @@ def render_step1_view(paths: dict):
                         pid=proc.pid,
                         status_file=status_file
                     )
-                    st.success(f"🚀 バックグラウンドワーカー (PID: {proc.pid}) を起動しました！ブラウザを閉じても安全に取得が継続されます。")
+                    st.success(f"バックグラウンドワーカー (PID: {proc.pid}) を起動しました。")
                     time.sleep(1)
                     st.rerun()
         except Exception:
             pass
 
-    btn_label = "⚡ バックグラウンドで取得実行中..." if is_running else "Japan Searchからの関連メタデータ一括取得および構造化実行"
+    btn_label = "バックグラウンドで取得実行中..." if is_running else "Japan Searchからの関連メタデータ一括取得および構造化実行"
     if st.button(btn_label, type="primary", disabled=is_running, use_container_width=True):
         if run_bg:
-            # 即座に全プロセス（URI収集 ➔ 詳細グラフ構築）をバックグラウンドワーカーに委譲
+            # 即座に全プロセス（URI収集 -> 詳細グラフ構築）をバックグラウンドワーカーに委譲
             params_file = os.path.join(os.path.dirname(paths['PATH_TARGET_URIS']), "current_fetch_params.json")
             os.makedirs(os.path.dirname(params_file), exist_ok=True)
             exp_payload = dict(exp)
@@ -653,7 +662,7 @@ def render_step1_view(paths: dict):
                 pid=proc.pid,
                 status_file=status_file
             )
-            st.success(f"🚀 バックグラウンドワーカー (PID: {proc.pid}) を起動しました！ダッシュボードに切り替えても、ブラウザを閉じても作業は継続されます。")
+            st.success(f"バックグラウンドワーカー (PID: {proc.pid}) を起動しました。ダッシュボードに切り替えても、ブラウザを閉じても作業は継続されます。")
             time.sleep(1)
             st.rerun()
         else:
@@ -764,15 +773,15 @@ def render_step1_view(paths: dict):
             st.metric("未取得 (未処理)", f"{report['missing_count']:,} 件", delta_color="inverse" if report['missing_count'] > 0 else "off")
 
         if report['is_complete']:
-            st.success(f"✅ 完全性チェック合格: 全 {report['total_target']:,} 件すべてのメタデータが正常に取得・格納されています。欠損はありません。")
+            st.success(f"完全性チェック合格: 全 {report['total_target']:,} 件すべてのメタデータが正常に取得・格納されています。欠損はありません。")
         else:
             total_missing = len(report['need_retry_uris'])
-            st.warning(f"⚠️ 合計 **{total_missing:,} 件** のメタデータに欠損または取得失敗が検知されました。以下のボタンより自動再取得（修復）を実行できます。")
+            st.warning(f"合計 **{total_missing:,} 件** のメタデータに欠損または取得失敗が検知されました。以下のボタンより自動再取得（修復）を実行できます。")
 
             with st.expander("欠損・取得失敗URI一覧（先頭50件）", expanded=False):
                 st.write(report['need_retry_uris'][:50])
 
-            if st.button("🛠️ 欠損・失敗メタデータの自動再取得（自律リカバリー）を実行", type="primary", use_container_width=True):
+            if st.button("欠損・失敗メタデータの自動再取得（自律リカバリー）を実行", type="primary", use_container_width=True):
                 repair_status = st.empty()
                 repair_progress = st.progress(0)
 
@@ -794,7 +803,7 @@ def render_step1_view(paths: dict):
                     )
 
                 if final_rep['is_complete']:
-                    st.success(f"🎉 修復完了: 全 {final_rep['total_target']:,} 件のメタデータがすべて正常に取得されました！")
+                    st.success(f"修復完了: 全 {final_rep['total_target']:,} 件のメタデータがすべて正常に取得されました。")
                 else:
                     st.info(f"修復完了: 正常取得 {final_rep['valid_count']:,} 件 / 残り未修復 {len(final_rep['need_retry_uris']):,} 件")
                 time.sleep(1)
@@ -809,7 +818,7 @@ def render_step1_view(paths: dict):
     manifest = get_acquisition_manifest(manifest_path)
     if manifest:
         st.write("---")
-        with st.expander("📋 初期メタデータプール取得条件マニフェスト (Acquisition Provenance)", expanded=False):
+        with st.expander("初期メタデータプール取得条件マニフェスト (Acquisition Provenance)", expanded=False):
             st.caption("研究成果の再現性を担保するため、初期データ取得時に適用された全条件（SPARQLクエリ・キーワード・NDC・取得統計）が記録されています。")
             col_m1, col_m2 = st.columns(2)
             with col_m1:
@@ -834,4 +843,10 @@ def render_step1_view(paths: dict):
                 for q_name, q_code in queries.items():
                     with st.expander(f"SPARQL: {q_name}", expanded=False):
                         st.code(q_code, language="sparql")
+
+    # 最下部ナビゲーション
+    render_step_navigation(
+        prev_choice="ダッシュボード",
+        next_choice="Step 2-A: データ種別 (rdf:type) 分析・除外"
+    )
 

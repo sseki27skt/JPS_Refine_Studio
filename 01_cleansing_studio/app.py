@@ -11,6 +11,7 @@ import streamlit as st
 # コンポーネント ＆ スタイル
 from components.styles import inject_custom_css
 from components.file_utils import count_lines
+from components.pipeline_bar import render_global_pipeline_bar
 
 # ビューモジュール
 from views.dashboard_view import render_dashboard_view
@@ -25,7 +26,7 @@ from views.workspace_view import render_workspace_view
 from modules.workspace_manager import WorkspaceManager
 
 # Streamlit ページ初期化
-st.set_page_config(layout="wide", page_title="JS-Refine Studio | メタデータ精緻化システム", page_icon="📚")
+st.set_page_config(layout="wide", page_title="JS-Refine Studio | メタデータ精緻化システム")
 
 # 全体CSSの注入
 inject_custom_css()
@@ -47,7 +48,7 @@ st.sidebar.caption("人文学文化資源 メタデータ精緻化システム")
 # ワークスペースが未作成（0件）の場合の特別ローンチハンドリング
 if not workspaces:
     st.sidebar.markdown("---")
-    st.sidebar.info("💡 **研究プロジェクトが未作成です**\n\n右側の画面から新規プロジェクトを立ち上げてください。")
+    st.sidebar.info("研究プロジェクトが未作成です。右側の画面から新規プロジェクトを立ち上げてください。")
     # 空のパス辞書でプロジェクト立ち上げビューを直接描画
     render_workspace_view({}, wm)
     st.stop()
@@ -59,10 +60,10 @@ if "active_workspace_id" not in st.session_state or st.session_state["active_wor
 current_ws_idx = ws_ids.index(st.session_state["active_workspace_id"]) if st.session_state["active_workspace_id"] in ws_ids else 0
 
 selected_ws_id = st.sidebar.selectbox(
-    "📁 研究プロジェクト (ワークスペース):",
+    "研究プロジェクト (ワークスペース):",
     options=ws_ids,
     index=current_ws_idx,
-    format_func=lambda x: f"📁 {ws_name_map.get(x, x)}",
+    format_func=lambda x: ws_name_map.get(x, x),
     key="sb_workspace_select"
 )
 
@@ -74,7 +75,7 @@ if selected_ws_id != st.session_state["active_workspace_id"]:
 PATHS = wm.get_workspace_paths(st.session_state["active_workspace_id"])
 
 def check_status(path):
-    return "●" if os.path.exists(path) and os.path.getsize(path) > 0 else "○"
+    return "[済]" if os.path.exists(path) and os.path.getsize(path) > 0 else "[未]"
 
 status_map = {
     "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得": PATHS["PATH_RAW_METADATA"],
@@ -87,8 +88,8 @@ status_map = {
 }
 
 menu_options = [
-    "📁 プロジェクト・履歴マネージャー",
-    "Dashboard",
+    "プロジェクト・履歴マネージャー",
+    "ダッシュボード",
     "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得",
     "Step 2-A: データ種別 (rdf:type) 分析・除外",
     "Step 2-B: 主題 (schema:about) キーワード分析・判別",
@@ -99,23 +100,25 @@ menu_options = [
 ]
 
 def format_menu_label(opt):
-    if opt == "📁 プロジェクト・履歴マネージャー":
-        return "📁 プロジェクト・履歴マネージャー"
-    if opt == "Dashboard":
-        return "📊 Dashboard"
+    if opt in ("プロジェクト・履歴マネージャー", "ダッシュボード"):
+        return opt
     p = status_map.get(opt)
-    st_mark = check_status(p) if p else "○"
+    st_mark = check_status(p) if p else "[未]"
     return f"{st_mark} {opt}"
 
 if "main_menu_choice" not in st.session_state or st.session_state["main_menu_choice"] not in menu_options:
-    st.session_state["main_menu_choice"] = "📁 プロジェクト・履歴マネージャー"
+    st.session_state["main_menu_choice"] = "プロジェクト・履歴マネージャー"
 
 choice = st.sidebar.radio("工程を選択:", menu_options, format_func=format_menu_label, key="main_menu_choice")
 
+# グローバル・パイプライン・ステータスバー描画 (画面上部)
+active_ws_name = ws_name_map.get(selected_ws_id, selected_ws_id)
+render_global_pipeline_bar(PATHS, choice, active_ws_name)
+
 # メインビュー描画（トップレベル直接ルーティング）
-if choice == "📁 プロジェクト・履歴マネージャー":
+if choice == "プロジェクト・履歴マネージャー":
     render_workspace_view(PATHS, wm)
-elif choice == "Dashboard":
+elif choice == "ダッシュボード":
     render_dashboard_view(PATHS)
 elif choice == "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得":
     render_step1_view(PATHS)

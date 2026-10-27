@@ -15,6 +15,7 @@ except (ImportError, ValueError):
         DuckDBManager = None
 
 from modules.review_portal import load_merged_review_data, save_human_verified_data
+from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation
 
 
 def _calc_review_sources_signature(paths: dict) -> tuple:
@@ -107,6 +108,14 @@ def render_step2d_view(paths: dict):
     st.title("Step 4: 専門家による最終査読・手動オーバーライド")
     st.caption("自動ルールおよびLLMセマンティック判定結果、外部Web参照情報を総合検証し、専門家判断による最終判定（合格・除外）の確定と修正を行います。")
 
+    render_guide_card(
+        step_num="Step 4",
+        step_title="専門家による最終査読・手動オーバーライド",
+        purpose="自動判定（ルール＋LLM）の結果を研究者自身が確認し、誤判定を手動で修正（オーバーライド）して確定させます。",
+        impact="専門家による修正が最優先され、確定フラグが付与されます（即時オートセーブ）。",
+        condition="各区分（合格/除外/保留）の境界線レコードを査読・確定し、データセットをFIXすること。"
+    )
+
     raw_metadata_path = paths['PATH_RAW_METADATA']
     verified_jsonl_path = paths['PATH_VERIFIED_JSONL']
 
@@ -124,7 +133,7 @@ def render_step2d_view(paths: dict):
         metrics = db.get_review_metrics()
         total_records = metrics["total"]
 
-        st.markdown("### 査読集約ステータスおよび判定修正状況 (⚡ DuckDB 高速集計)")
+        st.markdown("### 査読集約ステータスおよび判定修正状況 (DuckDB 高速集計)")
         c_m1, c_m2, c_m3, c_m4, c_m5 = st.columns([2.5, 2.5, 2.5, 2.5, 2])
         with c_m1:
             st.metric("総査読対象数", f"{total_records:,} 件")
@@ -135,8 +144,7 @@ def render_step2d_view(paths: dict):
         with c_m4:
             st.metric("判定修正 (オーバーライド) 数", f"{metrics['override_cnt']:,} 件", delta=f"{metrics['override_cnt']} 件を修正済み" if metrics['override_cnt'] > 0 else None)
         with c_m5:
-            st.markdown("<div style='padding-top: 10px;'></div>", unsafe_allow_html=True)
-            if st.button("🔄 データを再同期", help="Step 2のルールやStep 3のLLM判定結果をDuckDBへ強制再読み込みします", use_container_width=True):
+            if st.button("データを再同期", help="Step 2のルールやStep 3のLLM判定結果をDuckDBへ強制再読み込みします", use_container_width=True):
                 db = get_or_create_review_db(paths, force_reload=True)
                 st.rerun()
 
@@ -157,39 +165,50 @@ def render_step2d_view(paths: dict):
         with c_f2:
             search_rev = st.text_input("タイトル / ID / 理由検索:", placeholder="例: 殺生石 または 画譜", key="search_rev_portal")
         with c_f3:
-            page_size_rev = st.selectbox("1ページの表示件数:", [10, 20, 50, 100], index=0, key="pg_size_rev")
+            page_size_rev = st.selectbox("1ページの表示件数:", [50, 100, 200, 500], index=0, key="pg_size_rev")
 
         # ページネーション設定
         page_key = f"rev_page_num_{filter_rev}_{search_rev}_{page_size_rev}"
         if page_key not in st.session_state:
             st.session_state[page_key] = 1
 
+        cur_page = st.session_state[page_key]
+
         # サーバーサイド高速クエリ実行 (0.002秒)
         total_show, page_records = db.query_review_records(
             filter_type=filter_rev,
             search_query=search_rev,
-            page=st.session_state[page_key],
+            page=cur_page,
             page_size=page_size_rev
         )
 
         total_pages = max(1, (total_show + page_size_rev - 1) // page_size_rev)
-        if st.session_state[page_key] > total_pages:
+        if cur_page > total_pages:
             st.session_state[page_key] = total_pages
+            cur_page = total_pages
 
-        c_p1, c_p2 = st.columns([3, 1])
+        c_p1, c_prev, c_p2, c_next = st.columns([2, 1, 1, 1])
         with c_p1:
             st.markdown(f"**該当件数: {total_show:,} 件** (全 {total_records:,} 件中)")
+        with c_prev:
+            if st.button("前へ", disabled=(cur_page <= 1), use_container_width=True, key=f"btn_prev_{page_key}"):
+                st.session_state[page_key] = max(1, cur_page - 1)
+                st.rerun()
         with c_p2:
             rev_page_num = st.number_input(
                 "ページ選択:",
                 min_value=1,
                 max_value=total_pages,
-                value=st.session_state[page_key],
+                value=cur_page,
                 step=1,
                 key=f"num_input_{page_key}"
             )
-            if rev_page_num != st.session_state[page_key]:
+            if rev_page_num != cur_page:
                 st.session_state[page_key] = rev_page_num
+                st.rerun()
+        with c_next:
+            if st.button("次へ", disabled=(cur_page >= total_pages), use_container_width=True, key=f"btn_next_{page_key}"):
+                st.session_state[page_key] = min(total_pages, cur_page + 1)
                 st.rerun()
 
         # 該当ページのみレンダリング (DOM負荷最小限)
@@ -200,14 +219,13 @@ def render_step2d_view(paths: dict):
             is_override = r["is_override"]
 
             with st.container(border=True):
-                c_h1, c_h2 = st.columns([3, 1])
+                c_h1, c_h2 = st.columns([8.2, 1.8])
                 with c_h1:
-                    st.markdown(f"### {r['title']}")
+                    st.markdown(f"**{r['title']}**")
                 with c_h2:
-                    badge_str = f"[合格]" if cur_status == "合格" else f"[除外]"
-                    if is_override:
-                        badge_str += " (手動修正済)"
-                    st.markdown(f"### `{badge_str}`")
+                    badge_cls = "status-badge-pass" if cur_status == "合格" else "status-badge-reject"
+                    override_badge = " <span class='status-badge status-badge-warn'>修正済</span>" if is_override else ""
+                    st.markdown(f"<span class='status-badge {badge_cls}'>{cur_status}</span>{override_badge}", unsafe_allow_html=True)
 
                 st.info(f"自動判定判定理由: {r['reasons']}")
 
@@ -243,6 +261,12 @@ def render_step2d_view(paths: dict):
             count = db.export_human_verified_data(verified_jsonl_path)
             st.session_state["duckdb_review_sig"] = _calc_review_sources_signature(paths)
             st.success(f"最終査読完了: 全 {count:,} 件の確定データを `{verified_jsonl_path}` に正常保存しました。")
+
+        # 最下部ナビゲーション
+        render_step_navigation(
+            prev_choice="Step 3: LLMセマンティック適合判定 (判定保留群の分類)",
+            next_choice="Step 5: データエクスポート (統合検索ポータル出力)"
+        )
         return
 
     # =========================================================================
@@ -262,11 +286,11 @@ def render_step2d_view(paths: dict):
             llm_judgments_path=llm_judgments_path
         )
 
-    if "human_decisions" not in st.session_state:
-        st.session_state["human_decisions"] = {r["id"]: r["status"] for r in review_records}
+    if "human_override_decisions" not in st.session_state:
+        st.session_state["human_override_decisions"] = {}
 
-    human_decisions = st.session_state["human_decisions"]
-    override_cnt = sum(1 for r in review_records if human_decisions.get(r["id"]) != r["status"])
+    human_overrides = st.session_state["human_override_decisions"]
+    override_cnt = len(human_overrides)
 
     st.markdown("### 査読集約ステータスおよび判定修正状況")
     c_m1, c_m2, c_m3, c_m4 = st.columns(4)
@@ -276,7 +300,7 @@ def render_step2d_view(paths: dict):
         null_cnt = sum(1 for r in review_records if r.get("llm_target") is None and "LLM" in r.get("reasons", ""))
         st.metric("LLM判定不能 (null)", f"{null_cnt:,} 件")
     with c_m3:
-        pass_cnt = sum(1 for r in review_records if human_decisions.get(r["id"]) == "合格")
+        pass_cnt = sum(1 for r in review_records if human_overrides.get(r["id"], r["status"]) == "合格")
         st.metric("現在の合格確定数", f"{pass_cnt:,} 件")
     with c_m4:
         st.metric("判定修正 (オーバーライド) 数", f"{override_cnt:,} 件", delta=f"{override_cnt} 件を人間が修正済み" if override_cnt > 0 else None)
@@ -293,18 +317,20 @@ def render_step2d_view(paths: dict):
                 "現在『除外』のデータのみ",
                 "LLM判定経由データのみ",
                 "手動修正 (オーバーライド) データのみ"
-            ]
+            ],
+            key="sb_filter_rev_fb"
         )
     with c_f2:
-        search_rev = st.text_input("タイトル / ID / 理由検索:", placeholder="例: 殺生石 または 画譜", key="search_rev_portal")
+        search_rev = st.text_input("タイトル / ID / 理由検索:", placeholder="例: 殺生石 または 画譜", key="search_rev_portal_fb")
     with c_f3:
-        page_size_rev = st.selectbox("1ページの表示件数:", [10, 20, 50, 100], index=0, key="pg_size_rev")
+        page_size_rev = st.selectbox("1ページの表示件数:", [50, 100, 200, 500], index=0, key="pg_size_rev_fb")
 
     show_records = []
     for r in review_records:
         rid = r["id"]
-        cur_status = human_decisions.get(rid, r["status"])
-        is_override = (cur_status != r["status"])
+        auto_status = r["status"]
+        cur_status = human_overrides.get(rid, auto_status)
+        is_override = (cur_status != auto_status)
 
         if filter_rev == "LLM判定不能 (null) データのみ":
             if not (r.get("llm_target") is None and "LLM" in r.get("reasons", "")):
@@ -329,31 +355,57 @@ def render_step2d_view(paths: dict):
     total_show = len(show_records)
     total_pages = max(1, (total_show + page_size_rev - 1) // page_size_rev)
 
-    c_p1, c_p2 = st.columns([3, 1])
+    page_key_fb = f"rev_page_fb_{filter_rev}_{search_rev}_{page_size_rev}"
+    if page_key_fb not in st.session_state:
+        st.session_state[page_key_fb] = 1
+
+    cur_page_fb = st.session_state[page_key_fb]
+    if cur_page_fb > total_pages:
+        st.session_state[page_key_fb] = total_pages
+        cur_page_fb = total_pages
+
+    c_p1, c_prev, c_p2, c_next = st.columns([2, 1, 1, 1])
     with c_p1:
         st.markdown(f"**該当件数: {total_show:,} 件** (全 {len(review_records):,} 件中)")
+    with c_prev:
+        if st.button("前へ", disabled=(cur_page_fb <= 1), use_container_width=True, key=f"btn_prev_{page_key_fb}"):
+            st.session_state[page_key_fb] = max(1, cur_page_fb - 1)
+            st.rerun()
     with c_p2:
-        rev_page_num = st.number_input("ページ選択:", min_value=1, max_value=total_pages, value=1, step=1, key="num_input_rev_page")
+        rev_page_num = st.number_input(
+            "ページ選択:",
+            min_value=1,
+            max_value=total_pages,
+            value=cur_page_fb,
+            step=1,
+            key=f"num_input_{page_key_fb}"
+        )
+        if rev_page_num != cur_page_fb:
+            st.session_state[page_key_fb] = rev_page_num
+            st.rerun()
+    with c_next:
+        if st.button("次へ", disabled=(cur_page_fb >= total_pages), use_container_width=True, key=f"btn_next_{page_key_fb}"):
+            st.session_state[page_key_fb] = min(total_pages, cur_page_fb + 1)
+            st.rerun()
 
-    start_idx = (rev_page_num - 1) * page_size_rev
+    start_idx = (cur_page_fb - 1) * page_size_rev
     end_idx = min(start_idx + page_size_rev, total_show)
     page_records = show_records[start_idx:end_idx]
 
     for r in page_records:
         rid = r["id"]
         auto_status = r["status"]
-        cur_status = human_decisions.get(rid, auto_status)
+        cur_status = human_overrides.get(rid, auto_status)
         is_override = (cur_status != auto_status)
 
         with st.container(border=True):
-            c_h1, c_h2 = st.columns([3, 1])
+            c_h1, c_h2 = st.columns([8.2, 1.8])
             with c_h1:
-                st.markdown(f"### {r['title']}")
+                st.markdown(f"**{r['title']}**")
             with c_h2:
-                badge_str = f"[合格]" if cur_status == "合格" else f"[除外]"
-                if is_override:
-                    badge_str += " (手動修正済)"
-                st.markdown(f"### `{badge_str}`")
+                badge_cls = "status-badge-pass" if cur_status == "合格" else "status-badge-reject"
+                override_badge = " <span class='status-badge status-badge-warn'>修正済</span>" if is_override else ""
+                st.markdown(f"<span class='status-badge {badge_cls}'>{cur_status}</span>{override_badge}", unsafe_allow_html=True)
 
             st.info(f"自動判定判定理由: {r['reasons']}")
 
@@ -378,10 +430,19 @@ def render_step2d_view(paths: dict):
                     horizontal=True
                 )
                 if new_status != cur_status:
-                    human_decisions[rid] = new_status
+                    if new_status == auto_status:
+                        human_overrides.pop(rid, None)
+                    else:
+                        human_overrides[rid] = new_status
                     st.rerun()
 
     st.markdown("---")
     if st.button("最終査読確定データ (`human_verified_cleaned.jsonl`) の保存", type="primary", use_container_width=True):
-        count = save_human_verified_data(review_records, human_decisions, verified_jsonl_path)
+        count = save_human_verified_data(review_records, human_overrides, verified_jsonl_path)
         st.success(f"最終査読完了: 全 {count:,} 件の確定データを `{verified_jsonl_path}` に保存しました。")
+
+    # 最下部ナビゲーション
+    render_step_navigation(
+        prev_choice="Step 3: LLMセマンティック適合判定 (判定保留群の分類)",
+        next_choice="Step 5: データエクスポート (統合検索ポータル出力)"
+    )
