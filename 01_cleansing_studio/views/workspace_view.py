@@ -15,6 +15,7 @@ import pandas as pd
 
 from modules.workspace_manager import WorkspaceManager
 from components.file_utils import count_lines
+from components.guide_card import navigate_to
 
 try:
     import duckdb
@@ -60,9 +61,8 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                     try:
                         created = wm.create_workspace(new_id, new_name, description=new_desc, research_theme=new_theme)
                         st.session_state["active_workspace_id"] = created["id"]
-                        st.session_state["main_menu_choice"] = "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得"
                         st.success(f"プロジェクト '{created['name']}' を立ち上げました。Step 1 へ進みます。")
-                        st.rerun()
+                        navigate_to("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
                     except Exception as e:
                         st.error(f"作成エラー: {e}")
 
@@ -83,9 +83,8 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                         with st.spinner("パッケージを展開中..."):
                             imported_meta = wm.import_package(temp_zip, new_ws_id=custom_id or None, new_name=custom_name or None)
                             st.session_state["active_workspace_id"] = imported_meta["id"]
-                            st.session_state["main_menu_choice"] = "ダッシュボード"
                             st.success(f"プロジェクト '{imported_meta['name']}' をインポートしました。")
-                            st.rerun()
+                            navigate_to("ダッシュボード")
                     except Exception as e:
                         st.error(f"インポートエラー: {e}")
                     finally:
@@ -109,8 +108,7 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
             if current_ws.get("description"):
                 st.info(current_ws.get("description"))
             if st.button("このプロジェクトで精緻化作業を開始 (Step 1 へ) ->", type="primary", key="btn_start_ws_step1"):
-                st.session_state["main_menu_choice"] = "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得"
-                st.rerun()
+                navigate_to("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
         with col_info2:
             disk_mb = current_ws.get("disk_size_bytes", 0) / (1024 * 1024)
             if disk_mb > 1024:
@@ -219,9 +217,8 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                     try:
                         created = wm.create_workspace(new_id, new_name, description=new_desc, research_theme=new_theme, clone_from=clone_id)
                         st.session_state["active_workspace_id"] = created["id"]
-                        st.session_state["main_menu_choice"] = "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得"
                         st.success(f"プロジェクト '{created['name']}' を作成しました。")
-                        st.rerun()
+                        navigate_to("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
                     except Exception as e:
                         st.error(f"作成エラー: {e}")
 

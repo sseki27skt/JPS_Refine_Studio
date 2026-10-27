@@ -151,7 +151,7 @@ def render_global_pipeline_bar(paths: dict, current_choice: str, workspace_name:
     else:
         surv_text = "初期データ未取得 （Step 1 より開始してください）"
 
-    # HTML構築
+    # HTML構築（余計な改行や4文字以上の行頭インデントを排除）
     nodes_html = []
     for i, node in enumerate(nodes):
         state_class = "pending"
@@ -160,31 +160,30 @@ def render_global_pipeline_bar(paths: dict, current_choice: str, workspace_name:
         elif node["completed"]:
             state_class = "completed"
 
-        node_box = f"""
-        <div class="pipeline-step-node {state_class}">
-            <span class="pipeline-step-title">{node['step']}</span>
-            <span class="pipeline-step-count">{node['count']}</span>
-        </div>
-        """
+        node_box = (
+            f'<div class="pipeline-step-node {state_class}">'
+            f'<span class="pipeline-step-title">{node["step"]}</span>'
+            f'<span class="pipeline-step-count">{node["count"]}</span>'
+            f'</div>'
+        )
         nodes_html.append(node_box)
         if i < len(nodes) - 1:
-            nodes_html.append("<span class='pipeline-arrow'>-></span>")
+            nodes_html.append("<span class='pipeline-arrow'>&rarr;</span>")
 
     steps_content = "".join(nodes_html)
 
-    bar_html = f"""
-    <div class="pipeline-bar-container">
-        <div class="pipeline-bar-header">
-            <span class="pipeline-ws-tag">
-                <span class="status-badge status-badge-neutral">研究プロジェクト</span>
-                <b>{workspace_name}</b>
-            </span>
-            <span class="pipeline-survival-metrics">{surv_text}</span>
-        </div>
-        <div class="pipeline-steps-wrapper">
-            {steps_content}
-        </div>
-    </div>
-    """
+    bar_html = (
+        f'<div class="pipeline-bar-container">'
+        f'<div class="pipeline-bar-header">'
+        f'<span class="pipeline-ws-tag">'
+        f'<span class="status-badge status-badge-neutral">研究プロジェクト</span>'
+        f'<b>{workspace_name}</b>'
+        f'</span>'
+        f'<span class="pipeline-survival-metrics">{surv_text}</span>'
+        f'</div>'
+        f'<div class="pipeline-steps-wrapper">{steps_content}</div>'
+        f'</div>'
+    )
 
     st.markdown(bar_html, unsafe_allow_html=True)
+

@@ -4,6 +4,7 @@ JS-Refine Studio - Dashboard ビュー
 """
 import streamlit as st
 from components.file_utils import count_lines
+from components.guide_card import navigate_to
 
 def render_dashboard_view(paths: dict):
     """ダッシュボード画面を描画"""
@@ -66,8 +67,7 @@ def render_dashboard_view(paths: dict):
     """)
 
     if st.button("データ収集を開始する (Step 1 へ進む) ->", type="primary"):
-        st.session_state["main_menu_choice"] = "Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得"
-        st.rerun()
+        navigate_to("Step 1: LLMクエリ拡張およびJapan Searchメタデータ取得")
 
     st.write("---")
     # --- 全データリセットセクション ---

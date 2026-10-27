@@ -57,6 +57,10 @@ if not workspaces:
 if "active_workspace_id" not in st.session_state or st.session_state["active_workspace_id"] not in ws_ids:
     st.session_state["active_workspace_id"] = ws_ids[0]
 
+# 外部ビューからのワークスペース切替をサイドバーselectboxへ同期
+if "sb_workspace_select" in st.session_state and st.session_state["sb_workspace_select"] != st.session_state["active_workspace_id"]:
+    st.session_state["sb_workspace_select"] = st.session_state["active_workspace_id"]
+
 current_ws_idx = ws_ids.index(st.session_state["active_workspace_id"]) if st.session_state["active_workspace_id"] in ws_ids else 0
 
 selected_ws_id = st.sidebar.selectbox(
@@ -106,10 +110,31 @@ def format_menu_label(opt):
     st_mark = check_status(p) if p else "[未]"
     return f"{st_mark} {opt}"
 
+# 保留中の画面遷移ターゲットがあれば反映
+if "nav_target" in st.session_state:
+    target = st.session_state.pop("nav_target")
+    if target in menu_options:
+        st.session_state["main_menu_choice"] = target
+
 if "main_menu_choice" not in st.session_state or st.session_state["main_menu_choice"] not in menu_options:
     st.session_state["main_menu_choice"] = "プロジェクト・履歴マネージャー"
 
-choice = st.sidebar.radio("工程を選択:", menu_options, format_func=format_menu_label, key="main_menu_choice")
+# サイドバーラジオのウィジェット用キー（_sb_main_menu_radio）と同期
+# ウィジェット作成前に代入するため、StreamlitWidgetAlreadyInstantiatedError を完全に防止
+st.session_state["_sb_main_menu_radio"] = st.session_state["main_menu_choice"]
+
+def _on_menu_change():
+    st.session_state["main_menu_choice"] = st.session_state["_sb_main_menu_radio"]
+
+choice = st.sidebar.radio(
+    "工程を選択:",
+    menu_options,
+    format_func=format_menu_label,
+    key="_sb_main_menu_radio",
+    on_change=_on_menu_change
+)
+
+st.session_state["main_menu_choice"] = choice
 
 # グローバル・パイプライン・ステータスバー描画 (画面上部)
 active_ws_name = ws_name_map.get(selected_ws_id, selected_ws_id)

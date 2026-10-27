@@ -20,7 +20,7 @@ from modules.llm_query_expander import (
     ndc_labels_to_codes
 )
 import pandas as pd
-from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation
+from components.guide_card import render_guide_card, render_summary_banner, render_step_navigation, navigate_to
 from modules.sparql_collector import (
     fetch_uris_with_query_func, 
     build_metadata_for_uris,
@@ -226,16 +226,13 @@ def render_step1_view(paths: dict):
         with c_cmp1:
             st.success(f"**メタデータ取得が完了しています**（全 {total:,} 件の書誌データが `{paths['PATH_RAW_METADATA']}` に安全に格納済みです）")
         with c_cmp2:
-            def _goto_step2():
-                st.session_state["main_menu_choice"] = "Step 2-A: データ種別 (rdf:type) 分析・除外"
-
-            st.button(
+            if st.button(
                 "Step 2-A へ進む",
                 key="btn_goto_step2",
                 type="primary",
-                on_click=_goto_step2,
                 use_container_width=True
-            )
+            ):
+                navigate_to("Step 2-A: データ種別 (rdf:type) 分析・除外")
         st.markdown("---")
     elif st_val == "STOPPED":
         proc = job_status.get("processed_count", 0)

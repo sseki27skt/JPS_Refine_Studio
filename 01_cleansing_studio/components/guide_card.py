@@ -50,6 +50,17 @@ def render_summary_banner(title: str, metrics_text: str = ""):
     st.markdown(banner_html, unsafe_allow_html=True)
 
 
+def navigate_to(target_choice: str):
+    """
+    指定した工程（画面）へ安全に遷移します。
+    StreamlitWidgetAlreadyInstantiatedError を防止し、
+    保留キューおよびセッションステートを安全に同期します。
+    """
+    st.session_state["nav_target"] = target_choice
+    st.session_state["main_menu_choice"] = target_choice
+    st.rerun()
+
+
 def render_step_navigation(
     prev_choice: Optional[str] = None, 
     next_choice: Optional[str] = None, 
@@ -68,12 +79,10 @@ def render_step_navigation(
         if prev_choice:
             label = prev_label or f"前へ: {prev_choice.split(':')[0] if ':' in prev_choice else prev_choice}"
             if st.button(f"<- {label}", key=f"nav_prev_{prev_choice}", use_container_width=True):
-                st.session_state["main_menu_choice"] = prev_choice
-                st.rerun()
+                navigate_to(prev_choice)
 
     with col_next:
         if next_choice:
             label = next_label or f"次へ進む: {next_choice.split(':')[0] if ':' in next_choice else next_choice}"
             if st.button(f"{label} ->", key=f"nav_next_{next_choice}", type="primary", use_container_width=True):
-                st.session_state["main_menu_choice"] = next_choice
-                st.rerun()
+                navigate_to(next_choice)
