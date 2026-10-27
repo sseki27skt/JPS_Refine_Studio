@@ -7,6 +7,24 @@ import json
 import os
 import re
 
+# 事前コンパイル済みの正規表現パターン (パフォーマンス最適化)
+GENRE_REGEXES = [
+    ("雅楽", re.compile(r"雅楽|唐楽|高麗楽|朗詠|催馬楽|笙|篳篥|竜笛|龍笛")),
+    ("能楽/謡曲", re.compile(r"能楽|謡曲|謡本|観世|宝生|金剛|喜多|狂言")),
+    ("三味線音楽", re.compile(r"三味線|長唄|義太夫|常磐津|清元|新内|地歌|地唄|端唄|俗曲|小唄")),
+    ("琵琶楽", re.compile(r"琵琶|平曲|平家琵琶|薩摩琵琶|筑前琵琶")),
+    ("尺八楽", re.compile(r"尺八|琴古|都山")),
+    ("声明/仏教音楽", re.compile(r"声明|伽陀|法会")),
+]
+
+INSTRUMENT_REGEXES = [
+    ("箏/琴", re.compile(r"箏|琴|十三絃")),
+    ("三味線", re.compile(r"三味線|三線")),
+    ("尺八", re.compile(r"尺八")),
+    ("琵琶", re.compile(r"琵琶")),
+    ("笙", re.compile(r"笙")),
+]
+
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "01_cleansing_studio")))
 from modules.duckdb_manager import DuckDBManager
@@ -181,29 +199,19 @@ if not records:
                 title_desc = (title + " " + desc).lower()
                 
                 if genre == "その他/不明" or not genre:
-                    if any(k in title_desc for k in ["雅楽", "唐楽", "高麗楽", "朗詠", "催馬楽", "笙", "篳篥", "竜笛", "龍笛"]):
-                        genre = "雅楽"
-                    elif any(k in title_desc for k in ["能楽", "謡曲", "謡本", "観世", "宝生", "金剛", "喜多", "狂言"]):
-                        genre = "能楽/謡曲"
-                    elif any(k in title_desc for k in ["三味線", "長唄", "義太夫", "常磐津", "清元", "新内", "地歌", "地唄", "端唄", "俗曲", "小唄"]):
-                        genre = "三味線音楽"
-                    elif any(k in title_desc for k in ["琵琶", "平曲", "平家琵琶", "薩摩琵琶", "筑前琵琶"]):
-                        genre = "琵琶楽"
-                    elif any(k in title_desc for k in ["尺八", "琴古", "都山"]):
-                        genre = "尺八楽"
-                    elif any(k in title_desc for k in ["声明", "伽陀", "法会"]):
-                        genre = "声明/仏教音楽"
+                    for g_name, g_regex in GENRE_REGEXES:
+                        if g_regex.search(title_desc):
+                            genre = g_name
+                            break
                     else:
                         genre = "古典書籍・一般"
 
                 # 楽器推論
                 instruments = data.get("instruments", [])
                 if not instruments:
-                    if any(k in title_desc for k in ["箏", "琴", "十三絃"]): instruments.append("箏/琴")
-                    if any(k in title_desc for k in ["三味線", "三線"]): instruments.append("三味線")
-                    if "尺八" in title_desc: instruments.append("尺八")
-                    if "琵琶" in title_desc: instruments.append("琵琶")
-                    if "笙" in title_desc: instruments.append("笙")
+                    for i_name, i_regex in INSTRUMENT_REGEXES:
+                        if i_regex.search(title_desc):
+                            instruments.append(i_name)
 
                 # 画像URL
                 image = data.get('schema:image', '')
