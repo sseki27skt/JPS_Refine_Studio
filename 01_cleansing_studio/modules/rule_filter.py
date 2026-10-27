@@ -160,7 +160,8 @@ def suggest_ng_keywords_with_llm(
     else:
         req_headers = {"Content-Type": "application/json"}
         if api_key:
-            req_headers["Authorization"] = f"Bearer {api_key}"
+            sanitized_key = api_key.replace('\r', '').replace('\n', '')
+            req_headers["Authorization"] = f"Bearer {sanitized_key}"
 
         payload = {
             "model": model,
@@ -280,7 +281,8 @@ def suggest_related_keywords_by_base(
     else:
         req_headers = {"Content-Type": "application/json"}
         if api_key:
-            req_headers["Authorization"] = f"Bearer {api_key}"
+            sanitized_key = api_key.replace('\r', '').replace('\n', '')
+            req_headers["Authorization"] = f"Bearer {sanitized_key}"
 
         payload = {
             "model": model,
