@@ -65,18 +65,18 @@ class DuckDBManager:
             );
         """)
         # 既存DBファイルに対するスキーママイグレーション
-        migration_columns = [
-            ("llm_evaluated", "BOOLEAN DEFAULT FALSE"),
-            ("type_reason", "VARCHAR DEFAULT NULL"),
-            ("about_reason", "VARCHAR DEFAULT NULL"),
-            ("ngram_reason", "VARCHAR DEFAULT NULL"),
-            ("adopted_stage", "VARCHAR DEFAULT NULL"),
-            ("drop_stage", "VARCHAR DEFAULT NULL"),
-            ("primary_reason", "VARCHAR DEFAULT NULL")
+        migration_queries = [
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS llm_evaluated BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS type_reason VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS about_reason VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS ngram_reason VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS adopted_stage VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS drop_stage VARCHAR DEFAULT NULL;",
+            "ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS primary_reason VARCHAR DEFAULT NULL;"
         ]
-        for col_name, col_type in migration_columns:
+        for query in migration_queries:
             try:
-                self.conn.execute(f"ALTER TABLE metadata_records ADD COLUMN IF NOT EXISTS {col_name} {col_type};")
+                self.conn.execute(query)
             except Exception:
                 pass
 
