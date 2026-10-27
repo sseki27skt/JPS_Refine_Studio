@@ -52,8 +52,8 @@ def get_cached_ngrams_from_titles_fast(file_path, file_mtime, min_n=2, max_n=9):
     counts = {n: Counter() for n in range(min_n, max_n + 1)}
     samples = {n: defaultdict(list) for n in range(min_n, max_n + 1)}
 
-    # 大規模データ時のサンプリング (最大5万件で上位ランキングを高速推定)
-    scan_titles = titles if len(titles) <= 50000 else titles[:50000]
+    # 正確な全体出現数を集計（全件スキャン）
+    scan_titles = titles
 
     for title in scan_titles:
         clean_title = clean_title_text(title)
@@ -105,9 +105,10 @@ def get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tup
 @st.cache_data(show_spinner=False)
 def get_cached_active_ngram_counts(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple, n_val):
     titles = get_cached_active_titles(file_path, file_mtime, ng_rules_tuple, ok_rules_tuple)
+    # 正確な未判定残存数を集計（全件スキャン）
     counts = Counter()
     samples = defaultdict(list)
-    scan_t = titles if len(titles) <= 50000 else titles[:50000]
+    scan_t = titles
     for title in scan_t:
         clean_t = clean_title_text(title)
         if len(clean_t) >= n_val:
@@ -682,7 +683,8 @@ def render_step2b_view(paths: dict):
 
             active_n_samples_map = {}
             for w, c, s in filtered_items:
-                eff_c = active_counts.get(w, 0)
+                raw_eff = active_counts.get(w, 0)
+                eff_c = min(raw_eff, c)  # 未判定件数が全体件数を超えないよう安全ガード
                 act_s = active_samples.get(w, [])
                 active_n_samples_map[w] = {
                     "eff_cnt": eff_c,

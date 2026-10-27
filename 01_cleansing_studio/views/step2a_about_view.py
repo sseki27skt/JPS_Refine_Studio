@@ -44,15 +44,19 @@ def cluster_about_keywords(about_ranking_tuples: list):
     from components.ndc_utils import (
         extract_ndc_number, 
         resolve_ndc_label, 
-        format_about_keyword_display
+        format_about_keyword_display,
+        prefetch_about_keywords_batch,
+        extract_ndlna_id, 
+        resolve_ndlna_label
     )
+
+    # 上位キーワードを事前一括解決（SPARQL 1.1 / NDC API）
+    prefetch_about_keywords_batch([kw for kw, _ in about_ranking_tuples[:200]])
 
     ndc_groups = defaultdict(list)
     ndlna_items = []
     prefix_groups = defaultdict(list)
     unassigned = []
-    
-    from components.ndc_utils import extract_ndlna_id, resolve_ndlna_label
 
     # 1. NDCコード / NDLNA典拠 / 階層区切り文字による分類
     for kw, count in about_ranking_tuples:
@@ -99,13 +103,24 @@ def cluster_about_keywords(about_ranking_tuples: list):
         })
         cluster_idx += 1
 
-    # 3. NDLNA 典拠クラスタの生成
+    # 3. NDL 典拠クラスタの生成 (NDLSH 件名 / NDLNA 人名・団体名)
     if ndlna_items:
+        # 典拠クラスタに含まれる全キーワードを一括事前解決（SPARQL 1.1）
+        auth_kws = [k for k, _ in ndlna_items]
+        prefetch_about_keywords_batch(auth_kws, max_items=len(auth_kws))
+
         items_sorted = sorted(ndlna_items, key=lambda x: x[1], reverse=True)
         total_cnt = sum(c for k, c in items_sorted)
+        # 代表ラベルのプレビュー
+        top_labels = []
+        for kw_item, _ in items_sorted[:3]:
+            lbl = resolve_ndlna_label(extract_ndlna_id(kw_item))
+            if lbl:
+                top_labels.append(lbl)
+        sub_desc = f" ({', '.join(top_labels)} 等)" if top_labels else ""
         clusters.append({
             "cluster_id": f"cl_ndlna_{cluster_idx}",
-            "name": f"NDLNA 典拠（人名・件名・団体名）",
+            "name": f"NDL典拠（件名・人名・団体名）{sub_desc}",
             "keywords": [k for k, c in items_sorted],
             "total_count": total_cnt
         })
@@ -306,11 +321,11 @@ def render_step2a_view(paths: dict):
         st.session_state["draft_about_changes"] = {}
     draft_ab = st.session_state["draft_about_changes"]
 
-    # フィルタフラグの永続セッション保持
+    # フィルタフラグの永続セッション保持（デフォルトで残存0件を非表示にし、無駄な検討を排除）
     if "persistent_hide_classified" not in st.session_state:
         st.session_state["persistent_hide_classified"] = False
     if "persistent_hide_zero_pills" not in st.session_state:
-        st.session_state["persistent_hide_zero_pills"] = False
+        st.session_state["persistent_hide_zero_pills"] = True
 
     checked_words = st.session_state["checked_words"]
 
@@ -686,7 +701,8 @@ def render_step2a_view(paths: dict):
                 else:
                     status_badge = f"❔ 未判定 (全{un_c}件)"
 
-                from components.ndc_utils import format_about_keyword_display
+                from components.ndc_utils import format_about_keyword_display, prefetch_about_keywords_batch
+                prefetch_about_keywords_batch(kws, max_items=len(kws))
 
                 # クラスタに属するキーワード件数をO(1)で高速算出
                 cl_total_cnt = sum(about_counts_map.get(k, 0) for k in kws)
@@ -772,7 +788,13 @@ def render_step2a_view(paths: dict):
                             col_k = cl_cols[idx_k % 3]
                             disp_k = format_about_keyword_display(kw, max_label_len=24)
                             
-                            cnt_badge = f" ({eff_kw_cnt:,}件)" if eff_kw_cnt != tot_kw_cnt else f" ({tot_kw_cnt:,}件)"
+                            if eff_kw_cnt == 0:
+                                cnt_badge = f" [残存0件/全{tot_kw_cnt:,}件]"
+                            elif eff_kw_cnt != tot_kw_cnt:
+                                cnt_badge = f" ({eff_kw_cnt:,}件/全{tot_kw_cnt:,}件)"
+                            else:
+                                cnt_badge = f" ({tot_kw_cnt:,}件)"
+
                             draft_tag = " [仮]" if is_in_draft else ""
                             if st_val == "OK":
                                 lbl = f"✅ {disp_k}{cnt_badge}{draft_tag}"

@@ -46,6 +46,11 @@ def render_pill_board(
     cur_limit = min(total_items, int(st.session_state.get(limit_key, items_per_page)))
     st.session_state[limit_key] = cur_limit
 
+    # 表示対象キーワードを一括事前解決（SPARQL 1.1 / NDC API）
+    from components.ndc_utils import prefetch_about_keywords_batch, format_about_keyword_display
+    current_words = [it[0] for it in items[:cur_limit] if it and len(it) > 0]
+    prefetch_about_keywords_batch(current_words, max_items=len(current_words))
+
     # 仮選択件数のバッジ表示
     draft_cnt = len(draft_dict) if isinstance(draft_dict, dict) else 0
 
@@ -98,10 +103,10 @@ def render_pill_board(
 
             active_info = active_samples_map.get(w, {})
             if isinstance(active_info, dict):
-                eff_c = active_info.get("eff_cnt", 0)
+                eff_c = min(int(active_info.get("eff_cnt", 0)), cnt)
                 display_samples = active_info.get("samples", [])
             elif isinstance(active_info, list):
-                eff_c = len(active_info)
+                eff_c = min(len(active_info), cnt)
                 display_samples = active_info
             else:
                 eff_c = cnt
