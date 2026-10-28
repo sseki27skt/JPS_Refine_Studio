@@ -13,7 +13,7 @@ _line_count_cache = {}
 
 def count_lines(path: str) -> int:
     """指定されたファイルの行数またはJSON要素数を爆速取得（バイナリバッファ＆mtimeキャッシュ）"""
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return 0
     try:
         mtime = os.path.getmtime(path)

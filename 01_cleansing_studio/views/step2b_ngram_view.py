@@ -265,8 +265,8 @@ def render_step2b_view(paths: dict):
 
     use_db_ngram = bool(os.path.exists(duckdb_path) and DuckDBManager is not None)
     cur_db_p = duckdb_path if use_db_ngram else None
-    cur_about_ng = about_ng_tuple if ("about_filtered" in chosen_source or chosen_source == data_source_options[0]) else None
-    cur_exc_types = bool("type_filtered" in chosen_source or "about_filtered" in chosen_source or chosen_source == data_source_options[0])
+    cur_about_ng = about_ng_tuple if about_ng_tuple else None
+    cur_exc_types = True
 
     input_mtime = os.path.getmtime(input_path) if os.path.exists(input_path) else 0
     input_titles = load_filtered_titles(input_path, input_mtime, db_path=cur_db_p, about_ng_tuple=cur_about_ng, exclude_types=cur_exc_types)

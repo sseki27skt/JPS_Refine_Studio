@@ -12,6 +12,8 @@ import shutil
 import tarfile
 import zipfile
 import datetime
+import time
+import gc
 from typing import List, Dict, Any, Optional
 
 try:
@@ -338,6 +340,7 @@ class WorkspaceManager:
         parquet_path = os.path.join(target_dir, "decisions.parquet")
         
         if os.path.exists(duckdb_path) and duckdb:
+            con = None
             try:
                 con = duckdb.connect(duckdb_path, read_only=True)
                 # テーブル存在確認
@@ -383,9 +386,14 @@ class WorkspaceManager:
                             FROM metadata_records
                         ) TO '{parquet_path}' (FORMAT 'PARQUET', COMPRESSION 'ZSTD');
                     """)
-                con.close()
             except Exception as e:
                 logger.error(f"[WorkspaceManager] Error dumping decisions to parquet: {e}")
+            finally:
+                if con:
+                    try:
+                        con.close()
+                    except Exception:
+                        pass
 
         # 3. スナップショットメタ情報の保存
         snap_meta = {
@@ -454,6 +462,7 @@ class WorkspaceManager:
         # 2. DuckDB 判定カラムの一括バッチ更新
         parquet_path = os.path.join(snap_dir, "decisions.parquet")
         if os.path.exists(duckdb_path) and os.path.exists(parquet_path) and duckdb:
+            con = None
             try:
                 con = duckdb.connect(duckdb_path)
                 con.execute(f"""
@@ -477,11 +486,16 @@ class WorkspaceManager:
                     FROM read_parquet('{parquet_path}') AS s
                     WHERE m.id = s.id;
                 """)
-                con.close()
                 logger.info(f"[WorkspaceManager] DuckDB 判定ステータスをスナップショット '{snapshot_id}' から復元完了")
             except Exception as e:
                 logger.error(f"[WorkspaceManager] Error restoring decisions from parquet: {e}")
                 return False
+            finally:
+                if con:
+                    try:
+                        con.close()
+                    except Exception:
+                        pass
 
         logger.info(f"[WorkspaceManager] スナップショット復元完了: {snapshot_id}")
         return True
@@ -517,6 +531,41 @@ class WorkspaceManager:
             "workspace_meta": meta
         }
 
+        # DuckDB 接続の安全なフラッシュとクローズ（Windows ファイルロック競合防止）
+        try:
+            from modules.duckdb_manager import DuckDBManager
+            DuckDBManager.close_all()
+        except Exception as e:
+            logger.debug(f"[WorkspaceManager] DuckDB 事前クローズ通知: {e}")
+
+        abs_output_path = os.path.abspath(output_path)
+
+        def _safe_write(zf_target: zipfile.ZipFile, src_file: str, target_arcname: str):
+            abs_src = os.path.abspath(src_file)
+            if not os.path.exists(abs_src):
+                return
+            # 0バイトの一時walファイルでロックされている場合をスキップ
+            if abs_src.endswith(".duckdb.wal") and os.path.getsize(abs_src) == 0:
+                return
+
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    zf_target.write(abs_src, target_arcname)
+                    return
+                except PermissionError as pe:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[WorkspaceManager] ファイルロック検知、リトライ中 ({attempt+1}/{max_retries}): {abs_src}")
+                        try:
+                            from modules.duckdb_manager import DuckDBManager
+                            DuckDBManager.close_all()
+                        except Exception:
+                            pass
+                        time.sleep(0.5)
+                        gc.collect()
+                    else:
+                        raise pe
+
         with zipfile.ZipFile(output_path, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
             # パッケージマニフェスト書き込み
             zf.writestr("package_manifest.json", json.dumps(package_manifest, ensure_ascii=False, indent=2))
@@ -528,7 +577,7 @@ class WorkspaceManager:
                     for f in files:
                         p = os.path.join(root, f)
                         arcname = os.path.join("rules", os.path.relpath(p, rules_dir))
-                        zf.write(p, arcname)
+                        _safe_write(zf, p, arcname)
 
             # データディレクトリ内のファイル
             data_dir = paths["DIR_DATA"]
@@ -547,9 +596,9 @@ class WorkspaceManager:
                         rel_p = os.path.relpath(p, data_dir)
                         if export_type == "recipe":
                             if f in recipe_allowed_files:
-                                zf.write(p, os.path.join("data", rel_p))
+                                _safe_write(zf, p, os.path.join("data", rel_p))
                         else:  # full
-                            zf.write(p, os.path.join("data", rel_p))
+                            _safe_write(zf, p, os.path.join("data", rel_p))
 
             # エクスポートディレクトリ内の成果物
             exports_dir = paths["DIR_EXPORTS"]
@@ -557,8 +606,12 @@ class WorkspaceManager:
                 for root, _, files in os.walk(exports_dir):
                     for f in files:
                         p = os.path.join(root, f)
+                        abs_p = os.path.abspath(p)
+                        # 出力先ZIP自身および他のZIPアーカイブはパッケージに再帰混入させない
+                        if abs_p == abs_output_path or f.lower().endswith(".zip"):
+                            continue
                         arcname = os.path.join("exports", os.path.relpath(p, exports_dir))
-                        zf.write(p, arcname)
+                        _safe_write(zf, p, arcname)
 
         logger.info(f"[WorkspaceManager] パッケージエクスポート完了: {output_path} (Type: {export_type})")
         return output_path
@@ -569,6 +622,13 @@ class WorkspaceManager:
         """
         if not os.path.exists(package_zip_path):
             raise FileNotFoundError(f"パッケージファイルが見つかりません: {package_zip_path}")
+
+        # DuckDB 接続の安全なフラッシュとクローズ
+        try:
+            from modules.duckdb_manager import DuckDBManager
+            DuckDBManager.close_all()
+        except Exception:
+            pass
 
         with zipfile.ZipFile(package_zip_path, 'r') as zf:
             # マニフェストの読み込み

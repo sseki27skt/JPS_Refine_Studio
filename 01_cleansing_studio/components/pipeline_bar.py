@@ -63,29 +63,27 @@ def get_pipeline_metrics(paths: dict, force_reload: bool = False) -> Dict[str, A
     if duckdb_path and os.path.exists(duckdb_path):
         try:
             from modules.duckdb_manager import DuckDBManager
-            db = DuckDBManager(db_path=duckdb_path)
-            stats = db.get_prisma_flow_stats()
-            total = stats.get("total_records", 0)
-            if total > 0:
-                metrics["total"] = total
-                metrics["type_pass"] = stats.get("type_passed", total)
-                metrics["type_disc"] = stats.get("type_discarded", 0)
-                metrics["rule_ok"] = stats.get("rule_ok", 0)
-                metrics["rule_ng"] = stats.get("rule_ng", 0)
-                metrics["rule_grey"] = stats.get("rule_grey", 0)
-                metrics["final_adopted"] = stats.get("final_adopted", 0)
-                metrics["has_data"] = True
-                metrics["step1_done"] = True
-                metrics["step2_type_done"] = (stats.get("type_discarded", 0) > 0 or os.path.exists(paths.get('PATH_TYPE_FILTERED', '')))
-                metrics["step2_rule_done"] = (stats.get("rule_ok", 0) > 0 or stats.get("rule_ng", 0) > 0)
-                metrics["step3_llm_done"] = (stats.get("llm_evaluated_total", 0) > 0 or os.path.exists(paths.get('PATH_LLM_JUDGMENTS', '')))
-                metrics["step4_review_done"] = os.path.exists(verified_path) and os.path.getsize(verified_path) > 0
-                metrics["step5_export_done"] = os.path.exists(export_json_path) and os.path.getsize(export_json_path) > 0
-                db.close()
-                st.session_state["_pipeline_metrics_sig"] = current_sig
-                st.session_state["_pipeline_metrics_cached"] = metrics
-                return dict(metrics)
-            db.close()
+            with DuckDBManager(db_path=duckdb_path) as db:
+                stats = db.get_prisma_flow_stats()
+                total = stats.get("total_records", 0)
+                if total > 0:
+                    metrics["total"] = total
+                    metrics["type_pass"] = stats.get("type_passed", total)
+                    metrics["type_disc"] = stats.get("type_discarded", 0)
+                    metrics["rule_ok"] = stats.get("rule_ok", 0)
+                    metrics["rule_ng"] = stats.get("rule_ng", 0)
+                    metrics["rule_grey"] = stats.get("rule_grey", 0)
+                    metrics["final_adopted"] = stats.get("final_adopted", 0)
+                    metrics["has_data"] = True
+                    metrics["step1_done"] = True
+                    metrics["step2_type_done"] = (stats.get("type_discarded", 0) > 0 or os.path.exists(paths.get('PATH_TYPE_FILTERED', '')))
+                    metrics["step2_rule_done"] = (stats.get("rule_ok", 0) > 0 or stats.get("rule_ng", 0) > 0)
+                    metrics["step3_llm_done"] = (stats.get("llm_evaluated_total", 0) > 0 or os.path.exists(paths.get('PATH_LLM_JUDGMENTS', '')))
+                    metrics["step4_review_done"] = os.path.exists(verified_path) and os.path.getsize(verified_path) > 0
+                    metrics["step5_export_done"] = os.path.exists(export_json_path) and os.path.getsize(export_json_path) > 0
+                    st.session_state["_pipeline_metrics_sig"] = current_sig
+                    st.session_state["_pipeline_metrics_cached"] = metrics
+                    return dict(metrics)
         except Exception:
             pass
 

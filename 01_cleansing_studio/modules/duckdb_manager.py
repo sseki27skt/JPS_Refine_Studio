@@ -7,6 +7,9 @@ DuckDB 高速メタデータ管理 ＆ フィルタリングエンジン
 import os
 import re
 import json
+import time
+import gc
+import weakref
 import duckdb
 from typing import List, Tuple, Dict, Any, Optional
 from collections import Counter
@@ -23,20 +26,79 @@ class DuckDBManager:
     """
     DuckDBを活用したメタデータ管理・高速フィルタリングエンジン
     """
+    _active_instances = weakref.WeakSet()
 
     def __init__(self, db_path: str = ":memory:"):
         """
         :param db_path: データベースファイルパス（デフォルトはインメモリ）
         """
         self.db_path = db_path
-        if db_path != ":memory:":
-            os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-        self.conn = duckdb.connect(self.db_path)
-        self._init_schema()
+        self._conn = None
+        self._ensure_connection()
+        self.__class__._active_instances.add(self)
+
+    @property
+    def conn(self):
+        """アクティブな DuckDB 接続を取得（未接続・切断済みの場合は自動再接続）"""
+        self._ensure_connection()
+        return self._conn
+
+    @conn.setter
+    def conn(self, value):
+        self._conn = value
+
+    def _ensure_connection(self):
+        """接続が存在しないか切断されている場合に再接続"""
+        if self._conn is None:
+            if self.db_path != ":memory:":
+                os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
+            self._conn = duckdb.connect(self.db_path)
+            self._init_schema()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self):
+        """接続終了（CHECKPOINTを実行してWALをフラッシュしてから安全にクローズ）"""
+        if self._conn is not None:
+            try:
+                self._conn.execute("CHECKPOINT;")
+            except Exception:
+                pass
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+    @classmethod
+    def close_all(cls):
+        """すべての DuckDBManager インスタンスの接続を安全に一括解放"""
+        for inst in list(cls._active_instances):
+            try:
+                inst.close()
+            except Exception:
+                pass
+        if _cached_duckdb_manager is not None:
+            try:
+                _cached_duckdb_manager.clear()
+            except Exception:
+                pass
+        try:
+            import streamlit as st
+            st.cache_resource.clear()
+        except Exception:
+            pass
+        gc.collect()
 
     def _init_schema(self):
         """テーブルおよびインデックスの初期化"""
-        self.conn.execute("""
+        if self._conn is None:
+            return
+        self._conn.execute("""
             CREATE TABLE IF NOT EXISTS metadata_records (
                 id VARCHAR PRIMARY KEY,
                 title VARCHAR,
@@ -1303,14 +1365,23 @@ class DuckDBManager:
                 "llm_passed": 0,
                 "llm_discarded": 0,
                 "human_override_count": 0,
+                "human_reviewed_count": 0,
                 "final_adopted": 0,
                 "final_discarded": 0,
-                "top_drop_reasons": []
+                "top_drop_reasons": [],
+                "step1_raw": 0,
+                "step2a_type_survivors": 0,
+                "step2b_about_survivors": 0,
+                "step2c_ngram_survivors": 0,
+                "step3_llm_evaluated": 0,
+                "step4_human_reviewed": 0,
+                "step5_export_ready": 0
             }
 
         # Type除外数
         type_disc_row = self.conn.execute("SELECT COUNT(*) FROM metadata_records WHERE type_status = 'NG';").fetchone()
         type_disc = type_disc_row[0] if type_disc_row else 0
+        type_passed = total - type_disc
 
         # Rule (About/Ngram) 判定数
         rule_ok_row = self.conn.execute("""
@@ -1352,12 +1423,34 @@ class DuckDBManager:
         """).fetchone()
         human_override = human_ov_row[0] if human_ov_row else 0
 
+        # 専門家査読完了件数
+        human_rev_row = self.conn.execute("SELECT COUNT(*) FROM metadata_records WHERE human_decision IS NOT NULL;").fetchone()
+        human_reviewed = human_rev_row[0] if human_rev_row else 0
+
         # 最終採択数
         final_ad_row = self.conn.execute("""
             SELECT COUNT(*) FROM metadata_records 
             WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格';
         """).fetchone()
         final_adopted = final_ad_row[0] if final_ad_row else 0
+
+        # Step 2-B / 2-C 個別通過推定
+        about_disc_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE (type_status IS NULL OR type_status != 'NG') 
+              AND (about_status = 'NG' OR drop_stage = 'RULE_ABOUT');
+        """).fetchone()
+        about_disc = about_disc_row[0] if about_disc_row else 0
+        step2b_survivors = max(0, type_passed - about_disc)
+
+        ngram_disc_row = self.conn.execute("""
+            SELECT COUNT(*) FROM metadata_records 
+            WHERE (type_status IS NULL OR type_status != 'NG') 
+              AND (about_status IS NULL OR about_status != 'NG')
+              AND (ngram_status = 'NG' OR drop_stage = 'RULE_NGRAM');
+        """).fetchone()
+        ngram_disc = ngram_disc_row[0] if ngram_disc_row else 0
+        step2c_survivors = max(0, step2b_survivors - ngram_disc)
 
         # 除外理由上位ランキング
         top_drop_rows = self.conn.execute("""
@@ -1372,7 +1465,7 @@ class DuckDBManager:
         return {
             "total_records": total,
             "type_discarded": type_disc,
-            "type_passed": total - type_disc,
+            "type_passed": type_passed,
             "rule_ok": rule_ok,
             "rule_ng": rule_ng,
             "rule_grey": rule_grey,
@@ -1380,9 +1473,18 @@ class DuckDBManager:
             "llm_passed": llm_pass,
             "llm_discarded": llm_disc,
             "human_override_count": human_override,
+            "human_reviewed_count": human_reviewed,
             "final_adopted": final_adopted,
             "final_discarded": total - final_adopted,
-            "top_drop_reasons": [(str(r[0]), int(r[1])) for r in top_drop_rows]
+            "top_drop_reasons": [(str(r[0]), int(r[1])) for r in top_drop_rows],
+            # ダッシュボード表示用エイリアス
+            "step1_raw": total,
+            "step2a_type_survivors": type_passed,
+            "step2b_about_survivors": step2b_survivors,
+            "step2c_ngram_survivors": step2c_survivors,
+            "step3_llm_evaluated": llm_total,
+            "step4_human_reviewed": human_reviewed if human_reviewed > 0 else human_override,
+            "step5_export_ready": final_adopted
         }
 
     def export_type_filtered_jsonl(self, output_path: str, batch_size: int = 10000) -> int:
@@ -1589,10 +1691,13 @@ class DuckDBManager:
             except Exception:
                 return {}
 
-    def close(self):
-        """接続終了"""
-        if self.conn:
-            self.conn.close()
+try:
+    import streamlit as st
+    @st.cache_resource
+    def _cached_duckdb_manager(p: str) -> "DuckDBManager":
+        return DuckDBManager(db_path=p)
+except Exception:
+    _cached_duckdb_manager = None
 
 
 def get_duckdb_manager(db_path: str) -> DuckDBManager:
@@ -1600,12 +1705,10 @@ def get_duckdb_manager(db_path: str) -> DuckDBManager:
     DuckDBManager のインスタンスを取得。
     Streamlit 実行環境下では st.cache_resource で共有し、頻繁な接続開閉によるオーバーヘッドとnanobindリークを防止。
     """
-    try:
-        import streamlit as st
-        @st.cache_resource
-        def _get_cached_db(p: str):
-            return DuckDBManager(db_path=p)
-        return _get_cached_db(os.path.abspath(db_path))
-    except Exception:
-        return DuckDBManager(db_path=db_path)
+    if _cached_duckdb_manager is not None:
+        try:
+            return _cached_duckdb_manager(os.path.abspath(db_path))
+        except Exception:
+            return DuckDBManager(db_path=db_path)
+    return DuckDBManager(db_path=db_path)
 

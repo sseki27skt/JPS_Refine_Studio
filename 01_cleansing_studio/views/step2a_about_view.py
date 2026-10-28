@@ -130,14 +130,14 @@ def cluster_about_keywords(about_ranking_tuples: list):
     if ndlna_items:
         # 典拠クラスタに含まれる全キーワードを一括事前解決（SPARQL 1.1）
         auth_kws = [k for k, _ in ndlna_items]
-        prefetch_about_keywords_batch(auth_kws, max_items=len(auth_kws))
+        prefetch_about_keywords_batch(auth_kws, max_items=min(len(auth_kws), 200))
 
         items_sorted = sorted(ndlna_items, key=lambda x: x[1], reverse=True)
         total_cnt = sum(c for k, c in items_sorted)
         # 代表ラベルのプレビュー
         top_labels = []
         for kw_item, _ in items_sorted[:3]:
-            lbl = resolve_ndlna_label(extract_ndlna_id(kw_item))
+            lbl = resolve_ndlna_label(extract_ndlna_id(kw_item), allow_network=False)
             if lbl:
                 top_labels.append(lbl)
         sub_desc = f" ({', '.join(top_labels)} 等)" if top_labels else ""
@@ -175,7 +175,7 @@ def cluster_about_keywords(about_ranking_tuples: list):
         if len(bitems) >= 2:
             bitems_sorted = sorted(bitems, key=lambda x: x[1], reverse=True)
             rep_name = bitems_sorted[0][0]
-            disp_rep = format_about_keyword_display(rep_name, max_label_len=25)
+            disp_rep = format_about_keyword_display(rep_name, max_label_len=25, allow_network=False)
             total_cnt = sum(c for k, c in bitems_sorted)
             clusters.append({
                 "cluster_id": f"cl_b_{cluster_idx}",
@@ -186,7 +186,7 @@ def cluster_about_keywords(about_ranking_tuples: list):
             cluster_idx += 1
         else:
             kw1, cnt1 = bitems[0]
-            disp_kw1 = format_about_keyword_display(kw1, max_label_len=30)
+            disp_kw1 = format_about_keyword_display(kw1, max_label_len=30, allow_network=False)
             clusters.append({
                 "cluster_id": f"cl_s_{cluster_idx}",
                 "name": f"単一: {disp_kw1}",
@@ -258,11 +258,11 @@ def render_step2a_view(paths: dict):
     exclude_ng_types = True
 
     @st.cache_data(show_spinner="DuckDBから主題キーワードを集計中...")
-    def load_about_features(db_p, in_p, mtime, exclude_types):
+    def load_about_features(db_p, in_p, mtime, exclude_types, ver=2):
         if db_p and os.path.exists(db_p) and DuckDBManager is not None:
             try:
                 db = get_duckdb_manager(db_p) if get_duckdb_manager else DuckDBManager(db_path=db_p)
-                ranking = db.get_about_keyword_counts(limit=3000, exclude_ng_types=exclude_types)
+                ranking = db.get_about_keyword_counts(limit=None, exclude_ng_types=exclude_types)
                 tot_cnt = db.get_active_record_count(exclude_ng_types=exclude_types)
                 if ranking:
                     return ranking, tot_cnt
@@ -278,7 +278,7 @@ def render_step2a_view(paths: dict):
                     tot_cnt += 1
         return ranking, tot_cnt
 
-    about_ranking, total_records_cnt = load_about_features(duckdb_path, input_path, input_mtime, exclude_ng_types)
+    about_ranking, total_records_cnt = load_about_features(duckdb_path, input_path, input_mtime, exclude_ng_types, ver=2)
     about_counts_map = dict(about_ranking)
 
     if not about_ranking:
@@ -428,9 +428,9 @@ def render_step2a_view(paths: dict):
     reduction_rate = discarded_records_cnt / max(1, total_records_cnt)
 
     all_kw_set = set([k for k, c in about_ranking])
-    ng_classified_count = len(all_kw_set & live_ng)
-    ok_classified_count = len(all_kw_set & live_ok)
-    unclassified_count = total_about_types - ng_classified_count - ok_classified_count
+    ng_classified_count = len(matched_ng_kws)
+    ok_classified_count = len(matched_ok_kws)
+    unclassified_count = max(0, total_about_types - ng_classified_count - ok_classified_count)
 
     # クラスタリングの実行 (O(N) 高速計算)
     about_clusters = cluster_about_keywords(about_ranking)
@@ -508,12 +508,15 @@ def render_step2a_view(paths: dict):
             delta=f"{remaining_records_cnt/max(1, total_records_cnt):.1%}",
             help="NGルールを除外し、次の工程へ引き継がれるメタデータ件数"
         )
+        classified_total = ng_classified_count + ok_classified_count
+        progress_rate = classified_total / max(1, total_about_types)
         st.metric(
             "キーワード判別進捗", 
             f"全 {total_about_types:,} 語",
-            delta=f"NG: {ng_classified_count} / OK: {ok_classified_count} / 未: {unclassified_count}",
-            help="登録されたNG/OKキーワードの総種類数"
+            delta=f"NG: {ng_classified_count:,} / OK: {ok_classified_count:,} / 未: {unclassified_count:,}",
+            help=f"データセット内の全 {total_about_types:,} 種類の主題キーワードのうち、判定済（NGまたはOK）の割合: {progress_rate:.1%}"
         )
+        st.progress(progress_rate, text=f"判別進捗: {progress_rate:.1%} ({classified_total:,} / {total_about_types:,} 語)")
 
         st.write("---")
 

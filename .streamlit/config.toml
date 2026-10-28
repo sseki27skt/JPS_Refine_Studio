@@ -1,4 +1,5 @@
 [server]
+maxUploadSize = 5120
 fileWatcherType = "none"
 headless = true
 enableCORS = false

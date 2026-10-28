@@ -909,8 +909,8 @@ def build_metadata_for_uris(
         eta_seconds=0,
         status_file=status_file
     )
-    logger.info(f"🎉 メタデータ構築完了: 全 {total_count:,} 件のデータが `{output_jsonl_path}` に正常格納されました。")
-    print(f"\n🎉 メタデータ構築完了: 全 {total_count:,} 件のデータが `{output_jsonl_path}` に正常格納されました。")
+    logger.info(f"メタデータ構築完了: 全 {total_count:,} 件のデータが `{output_jsonl_path}` に正常格納されました。")
+    print(f"\n[完了] メタデータ構築完了: 全 {total_count:,} 件のデータが `{output_jsonl_path}` に正常格納されました。")
 
     return processed_count
 

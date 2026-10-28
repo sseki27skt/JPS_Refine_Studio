@@ -391,7 +391,7 @@ def fetch_ndlna_from_api(auth_id: str, save_immediate: bool = False, allow_netwo
     return _mem_ndlna_cache.get(auth_id)
 
 
-def resolve_ndlna_label(auth_id: str, allow_network: bool = True) -> str:
+def resolve_ndlna_label(auth_id: str, allow_network: bool = False) -> str:
     """NDL 典拠ID（NDLNA / NDLSH）から日本語・代表ラベルを取得"""
     if not auth_id:
         return ""
@@ -553,7 +553,7 @@ SELECT ?ndlc ?label WHERE {{
     return _mem_ndlc_cache
 
 
-def resolve_ndlc_label(code: str, allow_network: bool = True) -> str:
+def resolve_ndlc_label(code: str, allow_network: bool = False) -> str:
     """NDLC 分類記号から代表普通件名ラベル（例: '謡曲, 謡本'）を取得"""
     c = extract_ndlc_code(code)
     if not c:
@@ -666,7 +666,7 @@ def save_all_caches():
 # 統合フォーマッタ ＆ リンク生成
 # =============================================================================
 
-def format_about_keyword_display(kw: str, max_label_len: int = 30) -> str:
+def format_about_keyword_display(kw: str, max_label_len: int = 30, allow_network: bool = False) -> str:
     """
     Aboutキーワードの表示用フォーマット。
     NDC / NDLSH / NDLNA を自動判別し、人間がパッと理解できる日本語ラベルを主役に整形します。
@@ -697,7 +697,7 @@ def format_about_keyword_display(kw: str, max_label_len: int = 30) -> str:
     auth_info = extract_ndl_auth_info(kw)
     if auth_info:
         auth_id, auth_type = auth_info
-        auth_lbl = resolve_ndlna_label(auth_id)
+        auth_lbl = resolve_ndlna_label(auth_id, allow_network=allow_network)
         
         orig_s = kw.strip()
         # 元がプレフィックス付きならそれを維持したタグにする
@@ -717,7 +717,7 @@ def format_about_keyword_display(kw: str, max_label_len: int = 30) -> str:
     # 3. NDLC の判定
     ndlc_code = extract_ndlc_code(kw)
     if ndlc_code:
-        ndlc_lbl = resolve_ndlc_label(ndlc_code)
+        ndlc_lbl = resolve_ndlc_label(ndlc_code, allow_network=allow_network)
         orig_s = kw.strip()
         tag = f"ndlc:{ndlc_code}" if "ndlc" in orig_s.lower() else ndlc_code
 

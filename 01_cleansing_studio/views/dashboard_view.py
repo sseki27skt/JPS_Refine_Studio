@@ -40,37 +40,56 @@ def render_dashboard_view(paths: dict):
     raw_metadata_path = paths.get('PATH_RAW_METADATA', '')
     duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb") if raw_metadata_path else "")
     
-    stats = None
+    stats = {}
     if duckdb_path and os.path.exists(duckdb_path):
         try:
             from modules.duckdb_manager import DuckDBManager
-            db = DuckDBManager(duckdb_path)
-            stats = db.get_prisma_flow_stats()
-            db.close()
+            with DuckDBManager(duckdb_path) as db:
+                stats = db.get_prisma_flow_stats() or {}
         except Exception:
-            pass
+            stats = {}
 
     cols = st.columns(4)
     with cols[0]:
-        val_step1 = stats["step1_raw"] if stats else count_lines(paths.get('PATH_RAW_METADATA'))
+        val_step1 = (stats.get("step1_raw") or stats.get("total_records")) if stats else None
+        if not val_step1:
+            val_step1 = count_lines(paths.get('PATH_RAW_METADATA', ''))
         st.metric("初期メタデータセット (Step 1)", f"{val_step1:,} 件")
 
     with cols[1]:
-        val_2a = stats["step2a_type_survivors"] if stats else count_lines(paths.get('PATH_TYPE_FILTERED', 'data/type_filtered.jsonl'))
-        val_2b = stats["step2b_about_survivors"] if stats else count_lines(paths.get('PATH_ABOUT_FILTERED'))
-        val_2c = stats["step2c_ngram_survivors"] if stats else count_lines(paths.get('PATH_NGRAM_FILTERED'))
+        # 2-A: データ種別通過 (DuckDBまたはtype_filtered.jsonl)
+        val_2a = stats.get("step2a_type_survivors") or stats.get("type_passed")
+        if val_2a is None or (val_2a == stats.get("total_records") and os.path.exists(paths.get('PATH_TYPE_FILTERED', ''))):
+            file_cnt = count_lines(paths.get('PATH_TYPE_FILTERED', ''))
+            if file_cnt > 0:
+                val_2a = file_cnt
+        val_2a = val_2a or 0
+
+        # 2-B: 主題キーワード通過 (about_filtered.jsonlまたはDuckDB)
+        file_2b = count_lines(paths.get('PATH_ABOUT_FILTERED', ''))
+        val_2b = file_2b if file_2b > 0 else (stats.get("step2b_about_survivors") or 0)
+
+        # 2-C: タイトル文字列通過 (ngram_filtered.jsonlまたはDuckDB)
+        file_2c = count_lines(paths.get('PATH_NGRAM_FILTERED', ''))
+        val_2c = file_2c if file_2c > 0 else (stats.get("step2c_ngram_survivors") or 0)
+
         st.metric("2-A データ種別通過", f"{val_2a:,} 件")
         st.metric("2-B 主題キーワード通過", f"{val_2b:,} 件")
         st.metric("2-C タイトル文字列通過", f"{val_2c:,} 件")
 
     with cols[2]:
-        val_s3 = stats["step3_llm_evaluated"] if stats else count_lines(paths.get('PATH_LLM_JUDGMENTS'))
-        val_s4 = stats["step4_human_reviewed"] if stats else count_lines(paths.get('PATH_VERIFIED_JSONL'))
+        file_s3 = count_lines(paths.get('PATH_LLM_JUDGMENTS', ''))
+        val_s3 = file_s3 if file_s3 > 0 else (stats.get("step3_llm_evaluated") or stats.get("llm_evaluated_total") or 0)
+
+        file_s4 = count_lines(paths.get('PATH_VERIFIED_JSONL', ''))
+        val_s4 = file_s4 if file_s4 > 0 else (stats.get("step4_human_reviewed") or stats.get("human_reviewed_count") or stats.get("final_adopted") or 0)
+
         st.metric("Step 3: LLM適合判定数", f"{val_s3:,} 件")
         st.metric("Step 4: 専門家確定数", f"{val_s4:,} 件")
 
     with cols[3]:
-        val_s5 = stats["step5_export_ready"] if stats else count_lines(paths.get('PATH_EXPORT_JSON'))
+        file_s5 = count_lines(paths.get('PATH_EXPORT_JSON', ''))
+        val_s5 = file_s5 if file_s5 > 0 else (stats.get("step5_export_ready") or stats.get("final_adopted") or 0)
         st.metric("統合検索用出力データ (Step 5)", f"{val_s5:,} 件")
 
     st.write("---")

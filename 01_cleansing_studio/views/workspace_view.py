@@ -331,13 +331,32 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
 
             exp_type = "recipe" if "軽量" in export_mode else "full"
 
-            if st.button("ZIPパッケージを生成して準備", type="primary", use_container_width=True):
-                with st.spinner("パッケージを圧縮生成中..."):
+            # バックグラウンド収集ワーカーの実行チェック
+            status_file = paths.get("PATH_FETCH_STATUS", "")
+            is_worker_running = False
+            if status_file and os.path.exists(status_file):
+                try:
+                    with open(status_file, "r", encoding="utf-8") as sf:
+                        st_data = json.load(sf)
+                        if st_data.get("status") == "RUNNING":
+                            is_worker_running = True
+                except Exception:
+                    pass
+
+            if is_worker_running:
+                st.warning("⚠️ 現在バックグラウンドでデータ収集ワーカーが実行中です。データ整合性を保つため、収集完了後にエクスポートを実行してください。")
+
+            if st.button("ZIPパッケージを生成して準備", type="primary", use_container_width=True, disabled=is_worker_running):
+                with st.spinner("パッケージを圧縮生成中...（大容量データの場合は数分かかる場合があります）"):
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     zip_fname = f"{current_ws_id}_{exp_type}_{timestamp}.zip"
                     out_zip_path = os.path.join(paths["DIR_EXPORTS"], zip_fname)
-                    wm.export_package(current_ws_id, out_zip_path, export_type=exp_type)
-                    st.session_state["last_exported_zip"] = out_zip_path
+                    try:
+                        wm.export_package(current_ws_id, out_zip_path, export_type=exp_type)
+                        st.session_state["last_exported_zip"] = out_zip_path
+                        st.success(f"パッケージの生成が完了しました（{zip_fname}）")
+                    except Exception as e:
+                        st.error(f"パッケージエクスポート中にエラーが発生しました: {e}")
 
             if "last_exported_zip" in st.session_state and os.path.exists(st.session_state["last_exported_zip"]):
                 zip_p = st.session_state["last_exported_zip"]
@@ -354,7 +373,7 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
         # インポート
         with col_im:
             st.markdown("### 他者作成パッケージのインポート")
-            uploaded_file = st.file_uploader("共有されたZIPパッケージを選択", type=["zip"])
+            uploaded_file = st.file_uploader("共有されたZIPパッケージを選択 (最大5GBまで対応)", type=["zip"])
 
             if uploaded_file is not None:
                 st.info(f"アップロードされたファイル: **{uploaded_file.name}** ({uploaded_file.size / (1024*1024):.2f} MB)")
@@ -363,12 +382,13 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                 custom_name = st.text_input("新規プロジェクト名（空欄の場合は自動命名）", placeholder="例: 〇〇先生提供データセット")
 
                 if st.button("ワークスペースとして展開・インポート", type="primary", use_container_width=True):
-                    # 一時保存
+                    # 一時保存（大容量でもメモリを圧迫しないようストリーミング書き出し）
                     temp_dir = os.path.join(paths["DIR_DATA"], "tmp_imports")
                     os.makedirs(temp_dir, exist_ok=True)
                     temp_zip = os.path.join(temp_dir, uploaded_file.name)
+                    import shutil
                     with open(temp_zip, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                        shutil.copyfileobj(uploaded_file, f)
 
                     try:
                         with st.spinner("パッケージを展開・検証中..."):
@@ -381,3 +401,27 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                     finally:
                         if os.path.exists(temp_zip):
                             os.remove(temp_zip)
+
+            # 超大容量（数GB〜十数GB）向けローカルパス直接インポート
+            with st.expander("または、PC内のローカルZIPファイルを直接指定してインポート（超大容量推奨）"):
+                st.caption("ブラウザアップロードを経由せず、ディスクから直接展開するため数十GBのデータでも瞬時にインポート可能です。")
+                local_zip_path = st.text_input("ZIPファイルの絶対パス:", placeholder=r"C:\Users\Shintaro\Desktop\JPS_Refine_Studio\exports\example.zip")
+                col_loc1, col_loc2 = st.columns(2)
+                with col_loc1:
+                    local_custom_id = st.text_input("新規プロジェクトID（任意）", key="local_im_id")
+                with col_loc2:
+                    local_custom_name = st.text_input("新規プロジェクト名（任意）", key="local_im_name")
+
+                if st.button("ローカルZIPから直接インポートを実行", type="secondary", use_container_width=True):
+                    clean_path = local_zip_path.strip().strip('"').strip("'")
+                    if clean_path and os.path.exists(clean_path) and clean_path.lower().endswith(".zip"):
+                        try:
+                            with st.spinner("ローカルパッケージを展開・インポート中..."):
+                                imported_meta = wm.import_package(clean_path, new_ws_id=local_custom_id or None, new_name=local_custom_name or None)
+                                st.session_state["active_workspace_id"] = imported_meta["id"]
+                                st.success(f"ワークスペース '{imported_meta['name']}' を正常に展開・インポートしました。")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"インポートエラー: {e}")
+                    else:
+                        st.error("指定されたパスに有効なZIPファイルが存在しません。パスをご確認ください。")
