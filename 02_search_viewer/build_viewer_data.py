@@ -71,22 +71,19 @@ if os.path.exists(DUCKDB_PATH):
                     description, 
                     coalesce(review_reasons, primary_reason, matched_reason, 'ルール合致') AS p_reason,
                     coalesce(adopted_stage, 'RULE') AS p_stage,
-                    raw_json
+                    json_extract_string(raw_json, '$."https://jpsearch.go.jp/term/property#sourceInfo"."schema:provider"') AS prov_val,
+                    json_extract_string(raw_json, '$."schema:image"') AS image_val
                 FROM metadata_records
                 WHERE coalesce(human_decision, CASE WHEN final_decision = 'OK' THEN '合格' ELSE '除外' END) = '合格'
                 LIMIT 500;
             """
             rows = db.conn.execute(query).fetchall()
             for r in rows:
-                item_id, title, desc, p_reason, p_stage, raw_j = r
-                raw_data = json.loads(raw_j) if raw_j else {}
+                item_id, title, desc, p_reason, p_stage, prov_val, image_val = r
 
                 provider = "Japan Search"
-                source = raw_data.get('https://jpsearch.go.jp/term/property#sourceInfo', {})
-                if isinstance(source, dict):
-                    prov_val = source.get('schema:provider', '')
-                    if prov_val:
-                        provider = str(prov_val).split('/')[-1]
+                if prov_val:
+                    provider = str(prov_val).split('/')[-1]
 
                 genre = "古典資料/その他"
                 t_desc = (str(title) + " " + str(desc)).lower()
@@ -104,9 +101,17 @@ if os.path.exists(DUCKDB_PATH):
                 if "琵琶" in t_desc: instruments.append("琵琶")
                 if "笙" in t_desc: instruments.append("笙")
 
-                image = raw_data.get('schema:image', '')
-                if isinstance(image, list) and image:
-                    image = image[0]
+                image = ''
+                if image_val:
+                    if image_val.startswith('['):
+                        try:
+                            img_list = json.loads(image_val)
+                            if img_list:
+                                image = img_list[0]
+                        except json.JSONDecodeError:
+                            image = image_val.strip('"')
+                    else:
+                        image = image_val.strip('"')
 
                 records.append({
                     "id": item_id,
