@@ -127,9 +127,8 @@ def render_step2_type_view(paths: dict):
                             try:
                                 db = DuckDBManager(db_path=duckdb_path)
                                 res = db.apply_type_filter_fast(list(target_ng))
-                                # 高速ストリーミングで type_filtered.jsonl も同期出力 (1〜2秒)
-                                db.export_type_filtered_jsonl(type_filtered_path)
                                 db.close()
+                                st.session_state["_pipeline_metrics_sig"] = None
                                 return res.get("total", 0), res.get("passed", 0), res.get("discarded", 0)
                             except Exception:
                                 pass
@@ -140,14 +139,14 @@ def render_step2_type_view(paths: dict):
                     st.success(f"保存完了（残存: {pas:,} 件 / 除外: {disc:,} 件）")
                     st.rerun()
             else:
-                if st.button("フィルタ再実行 (type_filtered.jsonl 更新)", use_container_width=True, key="btn_reapply_type_filter"):
+                if st.button("フィルタ再適用 (DuckDB 更新)", use_container_width=True, key="btn_reapply_type_filter"):
                     save_type_rules(type_rules_path, {"NG": current_ng, "OK": set()})
                     if os.path.exists(duckdb_path):
                         try:
                             db = DuckDBManager(db_path=duckdb_path)
                             res = db.apply_type_filter_fast(list(current_ng))
-                            db.export_type_filtered_jsonl(type_filtered_path)
                             db.close()
+                            st.session_state["_pipeline_metrics_sig"] = None
                             tot, pas, disc = res.get("total", 0), res.get("passed", 0), res.get("discarded", 0)
                         except Exception:
                             tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
@@ -155,6 +154,24 @@ def render_step2_type_view(paths: dict):
                         tot, pas, disc = apply_type_filter(raw_path, type_filtered_path, type_rules_path)
                     st.success(f"更新完了（残存: {pas:,} 件 / 除外: {disc:,} 件）")
                     st.rerun()
+
+            # Step 2-B へのクイック遷移ボタン
+            if st.button("Step 2-B (主題分析) へ進む ➔", use_container_width=True, key="btn_nav_to_step2b"):
+                if len(draft_types) > 0:
+                    for t_lbl, act in draft_types.items():
+                        if act == "NG": current_ng.add(t_lbl)
+                        elif act == "RESET": current_ng.discard(t_lbl)
+                    draft_types.clear()
+                    save_type_rules(type_rules_path, {"NG": current_ng, "OK": set()})
+                    if os.path.exists(duckdb_path):
+                        try:
+                            db = DuckDBManager(db_path=duckdb_path)
+                            db.apply_type_filter_fast(list(current_ng))
+                            db.close()
+                        except Exception:
+                            pass
+                st.session_state["nav_target"] = "Step 2-B: 主題 (schema:about) キーワード分析・判別"
+                st.rerun()
 
             st.write("---")
             st.markdown("##### 登録済除外種別")
@@ -206,8 +223,8 @@ def render_step2_type_view(paths: dict):
                             try:
                                 db = DuckDBManager(db_path=duckdb_path)
                                 db.apply_type_filter_fast([])
-                                db.export_type_filtered_jsonl(type_filtered_path)
                                 db.close()
+                                st.session_state["_pipeline_metrics_sig"] = None
                             except Exception:
                                 apply_type_filter(raw_path, type_filtered_path, type_rules_path)
                         else:

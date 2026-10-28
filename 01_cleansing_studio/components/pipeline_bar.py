@@ -8,8 +8,36 @@ import streamlit as st
 from typing import Dict, Any
 
 
-def get_pipeline_metrics(paths: dict) -> Dict[str, Any]:
-    """パイプラインの各段階のレコード数を高速取得（DuckDB優先）"""
+def _calc_pipeline_sources_sig(paths: dict) -> tuple:
+    """パイプライン集計に関わるファイルのシグネチャ（パス、mtime、サイズ）を計算"""
+    files_to_check = [
+        paths.get('PATH_DUCKDB', ''),
+        paths.get('PATH_RAW_METADATA', ''),
+        paths.get('PATH_TYPE_RULES', ''),
+        paths.get('PATH_ABOUT_RULES', ''),
+        paths.get('PATH_NGRAM_RULES', ''),
+        paths.get('PATH_LLM_JUDGMENTS', ''),
+        paths.get('PATH_VERIFIED_JSONL', ''),
+        paths.get('PATH_EXPORT_JSON', '')
+    ]
+    sig = []
+    for p in files_to_check:
+        if p and os.path.exists(p):
+            sig.append((p, os.path.getmtime(p), os.path.getsize(p)))
+        else:
+            sig.append((p, 0, 0))
+    return tuple(sig)
+
+
+def get_pipeline_metrics(paths: dict, force_reload: bool = False) -> Dict[str, Any]:
+    """パイプラインの各段階のレコード数を高速取得（シグネチャキャッシュ ＆ DuckDB優先）"""
+    current_sig = _calc_pipeline_sources_sig(paths)
+    cached_sig = st.session_state.get("_pipeline_metrics_sig")
+    cached_metrics = st.session_state.get("_pipeline_metrics_cached")
+
+    if not force_reload and cached_metrics is not None and cached_sig == current_sig:
+        return dict(cached_metrics)
+
     duckdb_path = paths.get('PATH_DUCKDB', '')
     raw_path = paths.get('PATH_RAW_METADATA', '')
     verified_path = paths.get('PATH_VERIFIED_JSONL', '')
@@ -54,7 +82,9 @@ def get_pipeline_metrics(paths: dict) -> Dict[str, Any]:
                 metrics["step4_review_done"] = os.path.exists(verified_path) and os.path.getsize(verified_path) > 0
                 metrics["step5_export_done"] = os.path.exists(export_json_path) and os.path.getsize(export_json_path) > 0
                 db.close()
-                return metrics
+                st.session_state["_pipeline_metrics_sig"] = current_sig
+                st.session_state["_pipeline_metrics_cached"] = metrics
+                return dict(metrics)
             db.close()
         except Exception:
             pass
@@ -74,7 +104,9 @@ def get_pipeline_metrics(paths: dict) -> Dict[str, Any]:
     if os.path.exists(export_json_path) and os.path.getsize(export_json_path) > 0:
         metrics["step5_export_done"] = True
 
-    return metrics
+    st.session_state["_pipeline_metrics_sig"] = current_sig
+    st.session_state["_pipeline_metrics_cached"] = metrics
+    return dict(metrics)
 
 
 def render_global_pipeline_bar(paths: dict, current_choice: str, workspace_name: str):
@@ -142,14 +174,29 @@ def render_global_pipeline_bar(paths: dict, current_choice: str, workspace_name:
         }
     ]
 
+    # ドラフト仮選択（未確定）の検知
+    active_draft_cnt = 0
+    draft_types = st.session_state.get("draft_type_changes", {})
+    if isinstance(draft_types, dict):
+        active_draft_cnt += len(draft_types)
+    draft_about = st.session_state.get("draft_about_changes", {})
+    if isinstance(draft_about, dict):
+        active_draft_cnt += len(draft_about)
+    for n in range(2, 10):
+        d_n = st.session_state.get(f"draft_n_{n}_changes", {})
+        if isinstance(d_n, dict):
+            active_draft_cnt += len(d_n)
+
+    draft_badge = f" <span class='status-badge status-badge-warn' style='margin-left: 6px;'>⚡ 仮選択: {active_draft_cnt} 件</span>" if active_draft_cnt > 0 else ""
+
     # サバイバル集約メッセージ
     if m["final_adopted"] > 0:
-        surv_text = f"最終確定採択: <span class='pipeline-survival-count'>{m['final_adopted']:,}</span> 件 （初期母集団: {m['total']:,} 件）"
+        surv_text = f"最終確定採択: <span class='pipeline-survival-count'>{m['final_adopted']:,}</span> 件 （初期母集団: {m['total']:,} 件）{draft_badge}"
     elif m["total"] > 0:
         cur_active = m["type_pass"] if m["type_pass"] > 0 else m["total"]
-        surv_text = f"現在残存母集団: <span class='pipeline-survival-count'>{cur_active:,}</span> 件 （初期収集: {m['total']:,} 件）"
+        surv_text = f"現在残存母集団: <span class='pipeline-survival-count'>{cur_active:,}</span> 件 （初期収集: {m['total']:,} 件）{draft_badge}"
     else:
-        surv_text = "初期データ未取得 （Step 1 より開始してください）"
+        surv_text = f"初期データ未取得 （Step 1 より開始してください）{draft_badge}"
 
     # HTML構築（余計な改行や4文字以上の行頭インデントを排除）
     nodes_html = []

@@ -214,41 +214,7 @@ def render_step2b_view(paths: dict):
         st.stop()
 
     duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
-    if os.path.exists(duckdb_path) and not os.path.exists(type_filtered_path) and DuckDBManager is not None:
-        try:
-            db = DuckDBManager(db_path=duckdb_path)
-            db.export_type_filtered_jsonl(type_filtered_path)
-            db.close()
-        except Exception:
-            pass
-
-    # --- 入力データソースの選択 ＆ 前段相互連携コントロール ---
-    data_source_options = []
-    if os.path.exists(about_filtered_path):
-        data_source_options.append("Step 2-B (主題 about) 適用後データ (about_filtered.jsonl)")
-    if os.path.exists(type_filtered_path):
-        data_source_options.append("Step 2-A (データ種別) 適用後データ (type_filtered.jsonl)")
-    data_source_options.append("初期メタデータセット全件 (raw_metadata.jsonl)")
-
-    c_src1, c_src2 = st.columns([3, 2])
-    with c_src1:
-        chosen_source = st.selectbox(
-            "分析対象データソース:",
-            options=data_source_options,
-            index=0,
-            help="前段で除外されたデータ種別や主題ノイズをあらかじめ省いた状態で Step 2-C の分析を行うことができます。",
-            key="sb_step2b_data_source"
-        )
-    
-    if "about_filtered" in chosen_source:
-        input_path = about_filtered_path
-    elif "type_filtered" in chosen_source:
-        input_path = type_filtered_path
-    else:
-        input_path = raw_metadata_path
-
-    if not os.path.exists(input_path):
-        input_path = raw_metadata_path
+    input_path = raw_metadata_path
 
     # 前段（Step 2-B: 主題 about）の確定ルールの動的ロード（DuckDBリアルタイム連携用）
     about_rules_path = paths.get('PATH_ABOUT_RULES', os.path.join(os.path.dirname(raw_metadata_path), "rules", "about_rules.json"))
@@ -262,15 +228,15 @@ def render_step2b_view(paths: dict):
             about_ng_list = []
     about_ng_tuple = tuple(sorted(about_ng_list))
 
-    with c_src2:
-        if "about_filtered" in chosen_source:
-            st.success("Step 2-B の除外結果を反映したデータセットで分析中")
-        elif len(about_ng_list) > 0 and ("type_filtered" in chosen_source or chosen_source == data_source_options[0]):
-            st.info(f"🔗 Step 2-B (主題NG: {len(about_ng_list):,} 語) を自動反映して分析中")
-        elif "type_filtered" in chosen_source:
-            st.success("Step 2-A の除外結果を反映したデータセットで分析中")
+    # --- 前段 (Step 2-A & Step 2-B) 双方向完全自動パイプライン連動インジケーター ---
+    c_pipe1, c_pipe2 = st.columns([1.5, 1.5])
+    with c_pipe1:
+        st.info("🔗 **Step 2-A (データ種別除外)** を自動反映して分析中")
+    with c_pipe2:
+        if len(about_ng_list) > 0:
+            st.info(f"🔗 **Step 2-B (主題NG: {len(about_ng_list):,} 語)** を自動反映して分析中")
         else:
-            st.caption("初期メタデータセット全件を対象に分析中")
+            st.caption("※ Step 2-B の登録ルールは現在0件です")
 
     if "edited_ngram_ng" not in st.session_state:
         ngram_rules = {}
@@ -423,14 +389,41 @@ def render_step2b_view(paths: dict):
 
         st.write("---")
 
-        # 3. フィルタ適用実行
+        # 3. フィルタ適用実行（DuckDB内部高速更新でI/O待ちゼロ）
         st.markdown("##### フィルタ適用実行")
-        if st.button("N-Gram フィルタを実行する", type="primary", use_container_width=True, key="btn_run_ngram_filter_ctrl"):
+        if st.button("N-Gram フィルタを確定適用する", type="primary", use_container_width=True, key="btn_run_ngram_filter_ctrl"):
             save_dict = build_expanded_ngram_rules(ngram_ng, ngram_ok, ngram_dict)
             safe_save_json(save_dict, ngram_rules_path)
 
-            passed, disc = run_ngram_filter(input_path, ngram_rules_path, ngram_filtered_path, f"{data_dir}/discarded_ngram.csv")
-            st.success(f"N-Gram フィルタリング完了: 通過 {passed:,} 件 / 除外 {disc:,} 件 (除外ログ: {data_dir}/discarded_ngram.csv)")
+            if use_db_ngram:
+                with st.spinner("DuckDB 内で N-Gram ルールを即時適用中..."):
+                    db = DuckDBManager(db_path=duckdb_path)
+                    about_rules = {}
+                    if os.path.exists(about_rules_path):
+                        try:
+                            with open(about_rules_path, 'r', encoding='utf-8') as f:
+                                about_rules = json.load(f)
+                        except Exception:
+                            pass
+                    res = db.apply_rules_fast(about_rules, save_dict)
+                    db.close()
+                    st.session_state["_pipeline_metrics_sig"] = None
+                    passed = res.get("ok", 0) + res.get("grey", 0)
+                    disc = res.get("ng", 0)
+            else:
+                passed, disc = 0, 0
+
+            _clear_all_ngram_order_caches()
+            st.session_state["ngram_view_ver"] += 1
+            st.success(f"N-Gram ルールを確定適用しました（残存見込: {passed:,} 件 / 除外: {disc:,} 件）")
+            st.rerun()
+
+        # Step 2-B へのクイック遷移ボタン（ドラフト自動保存付き）
+        if st.button("⬅ Step 2-B (主題キーワード分析) へ戻る", use_container_width=True, key="btn_nav_back_to_step2b"):
+            if total_draft_cnt > 0:
+                _apply_and_save_ngram_draft()
+            st.session_state["nav_target"] = "Step 2-B: 主題 (schema:about) キーワード分析・判別"
+            st.rerun()
 
         st.write("---")
 
@@ -847,6 +840,13 @@ def render_step2b_view(paths: dict):
                     continue
                 display_items.append(item_map[w])
 
+            # インパクトメトリクス情報の構築 (現在の文字数タブで仮選択がある場合)
+            n_draft_cnt = len(draft_n)
+            impact_metrics_n = {
+                "discarded_delta": max(0, ngram_discarded_records - len(comm_discarded_ids)),
+                "remaining_count": ngram_remaining_records
+            } if n_draft_cnt > 0 else None
+
             render_pill_board(
                 items=display_items,
                 active_samples_map=active_n_samples_map,
@@ -856,7 +856,8 @@ def render_step2b_view(paths: dict):
                 click_action_mode=c_mode_n,
                 page_session_key=f"ngram_page_n_{n_val}",
                 parent_rule_func=lambda w: get_parent_rule(w, ngram_ng, ngram_ok),
-                on_confirm_save=_apply_and_save_ngram_draft
+                on_confirm_save=_apply_and_save_ngram_draft,
+                impact_metrics=impact_metrics_n
             )
 
         # ---------------------------------------------------------------------

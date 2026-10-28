@@ -36,21 +36,42 @@ def render_dashboard_view(paths: dict):
 
     st.subheader("パイプライン全体進捗ダッシュボード")
 
+    import os
+    raw_metadata_path = paths.get('PATH_RAW_METADATA', '')
+    duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb") if raw_metadata_path else "")
+    
+    stats = None
+    if duckdb_path and os.path.exists(duckdb_path):
+        try:
+            from modules.duckdb_manager import DuckDBManager
+            db = DuckDBManager(duckdb_path)
+            stats = db.get_prisma_flow_stats()
+            db.close()
+        except Exception:
+            pass
+
     cols = st.columns(4)
     with cols[0]:
-        st.metric("初期メタデータセット (Step 1)", f"{count_lines(paths['PATH_RAW_METADATA']):,} 件")
+        val_step1 = stats["step1_raw"] if stats else count_lines(paths.get('PATH_RAW_METADATA'))
+        st.metric("初期メタデータセット (Step 1)", f"{val_step1:,} 件")
 
     with cols[1]:
-        st.metric("2-A データ種別通過", f"{count_lines(paths.get('PATH_TYPE_FILTERED', 'data/type_filtered.jsonl')):,} 件")
-        st.metric("2-B 主題キーワード通過", f"{count_lines(paths['PATH_ABOUT_FILTERED']):,} 件")
-        st.metric("2-C タイトル文字列通過", f"{count_lines(paths['PATH_NGRAM_FILTERED']):,} 件")
+        val_2a = stats["step2a_type_survivors"] if stats else count_lines(paths.get('PATH_TYPE_FILTERED', 'data/type_filtered.jsonl'))
+        val_2b = stats["step2b_about_survivors"] if stats else count_lines(paths.get('PATH_ABOUT_FILTERED'))
+        val_2c = stats["step2c_ngram_survivors"] if stats else count_lines(paths.get('PATH_NGRAM_FILTERED'))
+        st.metric("2-A データ種別通過", f"{val_2a:,} 件")
+        st.metric("2-B 主題キーワード通過", f"{val_2b:,} 件")
+        st.metric("2-C タイトル文字列通過", f"{val_2c:,} 件")
 
     with cols[2]:
-        st.metric("Step 3: LLM適合判定数", f"{count_lines(paths['PATH_LLM_JUDGMENTS']):,} 件")
-        st.metric("Step 4: 専門家確定数", f"{count_lines(paths['PATH_VERIFIED_JSONL']):,} 件")
+        val_s3 = stats["step3_llm_evaluated"] if stats else count_lines(paths.get('PATH_LLM_JUDGMENTS'))
+        val_s4 = stats["step4_human_reviewed"] if stats else count_lines(paths.get('PATH_VERIFIED_JSONL'))
+        st.metric("Step 3: LLM適合判定数", f"{val_s3:,} 件")
+        st.metric("Step 4: 専門家確定数", f"{val_s4:,} 件")
 
     with cols[3]:
-        st.metric("統合検索用出力データ (Step 5)", f"{count_lines(paths['PATH_EXPORT_JSON']):,} 件")
+        val_s5 = stats["step5_export_ready"] if stats else count_lines(paths.get('PATH_EXPORT_JSON'))
+        st.metric("統合検索用出力データ (Step 5)", f"{val_s5:,} 件")
 
     st.write("---")
     st.subheader("ワークフロー概要")

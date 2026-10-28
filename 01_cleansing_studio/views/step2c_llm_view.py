@@ -58,33 +58,56 @@ def render_step2c_view(paths: dict):
         st.warning("対象データが存在しません。先に Step 1 または Step 2 を実行してください。")
         st.stop()
 
-    # 既存の分割結果が存在するかチェック (不要な毎フレーム再計算を防止)
-    has_split_files = os.path.exists(target_for_llm_path) and os.path.exists(confirmed_ok_path)
+    def _calc_rules_sig():
+        sig = []
+        for p in [about_rules_path, ngram_rules_path, paths.get('PATH_TYPE_RULES')]:
+            if p and os.path.exists(p):
+                sig.append((p, os.path.getmtime(p), os.path.getsize(p)))
+            else:
+                sig.append((p, 0, 0))
+        return tuple(sig)
+
+    current_rules_sig = _calc_rules_sig()
+    cached_rules_sig = st.session_state.get("_step2c_rules_sig")
+    needs_split = (cached_rules_sig != current_rules_sig) or (not os.path.exists(target_for_llm_path))
+
+    duckdb_path = paths.get("PATH_DUCKDB", os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
+    has_duckdb_llm = bool(DuckDBManager and os.path.exists(duckdb_path))
 
     def do_split():
-        duckdb_path = paths.get("PATH_DUCKDB", os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
-        if DuckDBManager and os.path.exists(duckdb_path):
+        if has_duckdb_llm:
             try:
-                with st.spinner("DuckDB 高速エンジンでルール仕分けを実行中 (OK合格 / NG除外 / グレーゾーン)..."):
+                with st.spinner("DuckDB 高速エンジンで最新ルール仕分けを即時計算中..."):
                     db = DuckDBManager(db_path=duckdb_path)
                     about_rules = {}
                     if os.path.exists(about_rules_path):
-                        with open(about_rules_path, 'r', encoding='utf-8') as f:
-                            about_rules = json.load(f)
+                        try:
+                            with open(about_rules_path, 'r', encoding='utf-8') as f:
+                                about_rules = json.load(f)
+                        except Exception:
+                            pass
                     ngram_rules = {}
                     if os.path.exists(ngram_rules_path):
-                        with open(ngram_rules_path, 'r', encoding='utf-8') as f:
-                            ngram_rules = json.load(f)
-                    db.apply_rules_fast(about_rules, ngram_rules)
-                    ok_c, ng_c, grey_c = db.export_split_datasets(
-                        output_target_for_llm_jsonl=target_for_llm_path,
-                        output_confirmed_ok_jsonl=confirmed_ok_path,
-                        output_discarded_csv=discarded_rules_path
-                    )
+                        try:
+                            with open(ngram_rules_path, 'r', encoding='utf-8') as f:
+                                ngram_rules = json.load(f)
+                        except Exception:
+                            pass
+                    res = db.apply_rules_fast(about_rules, ngram_rules)
+                    # LLM推論対象（Grey群）のみをストリーミング書き出し
+                    grey_c = db.export_intermediate_jsonl('target_for_llm', target_for_llm_path) if hasattr(db, 'export_intermediate_jsonl') else 0
+                    if grey_c == 0:
+                        _, _, grey_c = db.export_split_datasets(
+                            output_target_for_llm_jsonl=target_for_llm_path,
+                            output_confirmed_ok_jsonl=confirmed_ok_path,
+                            output_discarded_csv=None
+                        )
                     db.close()
-                    return ok_c, ng_c, grey_c
+                    st.session_state["_step2c_rules_sig"] = current_rules_sig
+                    st.session_state["_pipeline_metrics_sig"] = None
+                    return res.get("ok", 0), res.get("ng", 0), res.get("grey", 0)
             except Exception as e:
-                st.warning(f"DuckDB仕分けでエラーが発生したため、通常モードへフォールバックします: {e}")
+                pass
 
         with st.spinner("ルールに基づいてデータを仕分け中 (OK合格 / NG除外 / グレーゾーン)..."):
             ok_c, ng_c, grey_c = split_dataset_by_rules(
@@ -93,23 +116,34 @@ def render_step2c_view(paths: dict):
                 ngram_rules_path=ngram_rules_path,
                 output_target_for_llm_jsonl=target_for_llm_path,
                 output_confirmed_ok_jsonl=confirmed_ok_path,
-                output_discarded_csv=discarded_rules_path
+                output_discarded_csv=None
             )
+            st.session_state["_step2c_rules_sig"] = current_rules_sig
             return ok_c, ng_c, grey_c
 
-
-    # ファイル未生成時のみ初回実行
-    if not has_split_files:
+    # ルール更新検知またはファイル未生成時のみ自動実行
+    if needs_split:
         ok_rules_cnt, ng_rules_cnt, grey_cnt = do_split()
     else:
-        ok_rules_cnt = count_lines(confirmed_ok_path)
-        ng_rules_cnt = count_lines(discarded_rules_path)
-        if ng_rules_cnt > 0:
-            ng_rules_cnt -= 1 # CSVヘッダー分
-        grey_cnt = count_lines(target_for_llm_path)
+        if has_duckdb_llm:
+            try:
+                db_cnt = DuckDBManager(db_path=duckdb_path)
+                p_stats = db_cnt.get_prisma_flow_stats()
+                db_cnt.close()
+                ok_rules_cnt = p_stats.get("rule_ok", 0)
+                ng_rules_cnt = p_stats.get("rule_ng", 0) + p_stats.get("type_discarded", 0)
+                grey_cnt = p_stats.get("rule_grey", 0)
+            except Exception:
+                ok_rules_cnt = count_lines(confirmed_ok_path) if os.path.exists(confirmed_ok_path) else 0
+                ng_rules_cnt = 0
+                grey_cnt = count_lines(target_for_llm_path) if os.path.exists(target_for_llm_path) else 0
+        else:
+            ok_rules_cnt = count_lines(confirmed_ok_path) if os.path.exists(confirmed_ok_path) else 0
+            ng_rules_cnt = 0
+            grey_cnt = count_lines(target_for_llm_path) if os.path.exists(target_for_llm_path) else 0
 
     # ステータス表示
-    st.markdown("### 事前ルールフィルタによる仕分け状況")
+    st.markdown("### 事前ルールフィルタによる仕分け状況 (DuckDB 自動同期)")
     c_flt1, c_flt2, c_flt3, c_flt_act = st.columns([2.5, 2.5, 2.5, 2.5])
     with c_flt1:
         st.metric("ルール適合 (LLMバイパス)", f"{ok_rules_cnt:,} 件", help="About/タイトルルールでOK判定されたためLLM判定をスキップ")
@@ -118,9 +152,9 @@ def render_step2c_view(paths: dict):
     with c_flt3:
         st.metric("LLM判定対象 (判定保留群)", f"{grey_cnt:,} 件", help="判定保留のデータ。これらのみがLLMへ投入されます。")
     with c_flt_act:
-        if st.button("ルール仕分けの再実行", help="Step 2の最新ルールを反映して仕分けファイルを再作成します", use_container_width=True):
+        if st.button("手動で再同期 ＆ 再仕分け", help="Step 2の最新ルールを強制的に反映して仕分けファイルを再作成します", use_container_width=True):
             ok_rules_cnt, ng_rules_cnt, grey_cnt = do_split()
-            st.success(f"最新ルールで再仕分け完了 (保留: {grey_cnt:,} 件)")
+            st.success(f"最新ルールで同期完了 (保留: {grey_cnt:,} 件)")
             st.rerun()
 
     cfg = st.session_state.get("llm_config", {})

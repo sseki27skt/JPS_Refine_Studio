@@ -224,43 +224,10 @@ def render_step2a_view(paths: dict):
         st.stop()
 
     duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb"))
-    # DuckDBが存在し、type_filtered.jsonlが未生成の場合はDuckDBから高速自動同期 (1〜2秒)
-    if os.path.exists(duckdb_path) and not os.path.exists(type_filtered_path) and DuckDBManager is not None:
-        try:
-            db = DuckDBManager(db_path=duckdb_path)
-            db.export_type_filtered_jsonl(type_filtered_path)
-            db.close()
-        except Exception:
-            pass
-
-    # --- 入力データソースの選択 ＆ 前段/後段 相互連携コントロール ---
-    data_source_options = []
-    if os.path.exists(type_filtered_path):
-        data_source_options.append("Step 2-A (データ種別) 適用後データ (type_filtered.jsonl)")
-    if os.path.exists(ngram_filtered_path):
-        data_source_options.append("Step 2-C (タイトル文字列) 適用後データ (ngram_filtered.jsonl)")
-    data_source_options.append("初期メタデータセット全件 (raw_metadata.jsonl)")
-
-    c_src1, c_src2 = st.columns([3, 2])
-    with c_src1:
-        chosen_source = st.selectbox(
-            "分析対象データソース:",
-            options=data_source_options,
-            index=0,
-            help="前段で除外されたデータ種別やタイトルノイズをあらかじめ省いた状態で Step 2-B の分析を行うことができます。",
-            key="sb_step2a_data_source"
-        )
-    
-    if "type_filtered" in chosen_source:
-        input_path = type_filtered_path
-    elif "ngram_filtered" in chosen_source:
-        input_path = ngram_filtered_path
-    else:
-        input_path = raw_metadata_path
-
+    input_path = raw_metadata_path
     input_mtime = os.path.getmtime(input_path) if os.path.exists(input_path) else 0
 
-    # Step 2-C タイトル NG ルールのロード (双方向完全自動連動用)
+    # Step 2-C タイトル NG ルールのロード (双方向完全自動連動)
     has_ngram_rules = os.path.exists(ngram_rules_path)
     ngram_ng_set = set()
     if has_ngram_rules:
@@ -271,24 +238,24 @@ def render_step2a_view(paths: dict):
         except Exception:
             ngram_ng_set = set()
 
-    with c_src2:
-        link_ngram_rules = False
-        if len(ngram_ng_set) > 0 and "ngram_filtered" not in chosen_source:
+    # --- 前段 (Step 2-A) ＆ 後段 (Step 2-C) 双方向完全自動パイプライン連動インジケーター ---
+    c_pipe1, c_pipe2 = st.columns([1.5, 1.5])
+    with c_pipe1:
+        st.info("🔗 **Step 2-A (データ種別除外)** を自動反映して分析中")
+    with c_pipe2:
+        link_ngram_rules = True
+        if len(ngram_ng_set) > 0:
             link_ngram_rules = st.toggle(
-                "🔗 Step 2-C (タイトルNGルール) を双方向自動連動",
+                f"🔗 Step 2-C (タイトルNG: {len(ngram_ng_set):,}語) を双方向自動連動",
                 value=True,
                 help="Step 2-C で確定登録済みのタイトル除外ルールに一致する資料を、Step 2-B の分析上でも自動的に除外扱いにして残存件数を計算します。OFFにすると2-A直後の素のデータで分析できます。",
                 key="tgl_step2a_link_ngram"
             )
-            if link_ngram_rules:
-                st.caption(f"※ Step 2-C の登録ルール ({len(ngram_ng_set):,} 語) を自動反映中")
-            else:
-                st.caption("※ Step 2-C 連動を一時解除中 (2-A 直後の状態で分析)")
-        elif "ngram_filtered" in chosen_source:
-            st.success("Step 2-C の除外結果を反映したデータセットで分析中")
+        else:
+            st.caption("※ Step 2-C の登録ルールは現在0件です")
 
     use_duckdb = bool(os.path.exists(duckdb_path) and DuckDBManager is not None)
-    exclude_ng_types = ("type_filtered" in chosen_source or chosen_source == data_source_options[0])
+    exclude_ng_types = True
 
     @st.cache_data(show_spinner="DuckDBから主題キーワードを集計中...")
     def load_about_features(db_p, in_p, mtime, exclude_types):
@@ -606,9 +573,9 @@ def render_step2a_view(paths: dict):
 
         st.write("---")
 
-        # 3. フィルタ適用実行
+        # 3. フィルタ適用実行（DuckDB内部高速更新でI/O待ちゼロ）
         st.markdown("##### フィルタ適用実行")
-        if st.button("About フィルタを実行する", type="primary", use_container_width=True, key="btn_run_about_filter_ctrl"):
+        if st.button("About フィルタを確定適用する", type="primary", use_container_width=True, key="btn_run_about_filter_ctrl"):
             # 仮選択がある場合は自動コミット＆保存
             if len(draft_ab) > 0:
                 for kw, status in draft_ab.items():
@@ -627,22 +594,36 @@ def render_step2a_view(paths: dict):
             save_dict.update({k: "OK" for k in current_ok})
             safe_save_json(save_dict, about_rules_path)
 
-            data_dir = os.path.dirname(about_filtered_path)
-            with st.spinner("About フィルタを適用中..."):
-                prog_bar = st.progress(0, text="About フィルタを適用中...")
-                tot_for_prog = max(1, total_records_cnt)
-                def _prog(cur):
-                    prog_bar.progress(min(1.0, cur / tot_for_prog), text=f"処理中: {cur:,} / {tot_for_prog:,} 件")
-                passed, disc = run_about_filter(
-                    input_path, about_rules_path, about_filtered_path, 
-                    f"{data_dir}/discarded_about.csv",
-                    progress_callback=_prog
-                )
-                prog_bar.empty()
-            
+            if use_duckdb:
+                with st.spinner("DuckDB 内で About ルールを即時適用中..."):
+                    db = DuckDBManager(db_path=duckdb_path)
+                    # 最新のタイトルNGルールも統合して完全連動適用
+                    ngram_rules = {}
+                    if os.path.exists(ngram_rules_path):
+                        try:
+                            with open(ngram_rules_path, 'r', encoding='utf-8') as f:
+                                ngram_rules = json.load(f)
+                        except Exception:
+                            pass
+                    res = db.apply_rules_fast(save_dict, ngram_rules)
+                    db.close()
+                    st.session_state["_pipeline_metrics_sig"] = None
+                    passed = res.get("ok", 0) + res.get("grey", 0)
+                    disc = res.get("ng", 0)
+            else:
+                passed, disc = 0, 0
+
+            _clear_all_about_order_caches()
             st.session_state["cluster_visible_limit"] = int(st.session_state.get("num_clusters_per_page", 10))
             st.session_state["chk_view_ver"] += 1
-            st.success(f"About フィルタ完了: 通過 {passed:,} 件 / 除外 {disc:,} 件")
+            st.success(f"About ルールを確定適用しました（残存見込: {passed:,} 件 / 除外: {disc:,} 件）")
+            st.rerun()
+
+        # Step 2-C へのクイック遷移ボタン（ドラフト自動保存付き）
+        if st.button("Step 2-C (タイトル語彙分析) へ進む ➔", use_container_width=True, key="btn_nav_to_step2c"):
+            if len(draft_ab) > 0:
+                _apply_and_save_about_draft()
+            st.session_state["nav_target"] = "Step 2-C: タイトル語彙・文字列パターン分析・除外"
             st.rerun()
 
         st.write("---")
@@ -765,6 +746,12 @@ def render_step2a_view(paths: dict):
                     else:
                         st.info("現在表示可能な資料がありません。")
 
+            # 各キーワードのアクティブ残存件数は辞書参照でO(1)
+            def _get_eff_k_cnt(k):
+                if k in matched_ng_kws:
+                    return 0
+                return active_about_counts.get(k, 0) if active_about_counts is not None else about_counts_map.get(k, 0)
+
             def render_single_cluster_card(c, cid, kws):
                 ng_c = sum(1 for k in kws if get_eff_status(k) == "NG")
                 ok_c = sum(1 for k in kws if get_eff_status(k) == "OK")
@@ -840,20 +827,20 @@ def render_step2a_view(paths: dict):
                 expander_title = f"{c['name']} [{status_badge}]{draft_indicator} （対象語句: {kw_preview} [{len(kws)}種類] ｜ {cnt_str}）"
 
                 with st.expander(expander_title, expanded=True):
-                    # 一括操作の対象キーワード選定（既存のOK/NG判定を保護）
-                    unclassified_kws = [k for k in kws if get_eff_status(k) == "UN"]
-                    is_partial = len(unclassified_kws) < len(kws)
-                    target_batch_kws = unclassified_kws if (is_partial or hide_fully_classified) else kws
+                    # 一括操作の対象キーワード選定（既存のOK/NG判定を保護 ＆ 残存0件の無意味な巻き込みを防止）
+                    active_unclassified_kws = [k for k in kws if get_eff_status(k) == "UN" and _get_eff_k_cnt(k) > 0]
+                    is_partial = len(active_unclassified_kws) < len(kws)
+                    target_batch_kws = active_unclassified_kws if (is_partial or hide_fully_classified) else [k for k in kws if _get_eff_k_cnt(k) > 0 or get_eff_status(k) != "UN"]
 
                     b_col1, b_col2, b_col3 = st.columns(3)
                     with b_col1:
-                        btn_ok_label = f"✅ 未判定のみ一括 OK [{len(target_batch_kws)}件]" if is_partial else f"✅ 一括 OK 仮設定 [{len(kws)}件]"
+                        btn_ok_label = f"✅ 残存未判定を一括 OK [{len(active_unclassified_kws)}件]" if is_partial else f"✅ 一括 OK 仮設定 [{len(target_batch_kws)}件]"
                         if st.button(btn_ok_label, key=f"btn_cl_ok_{cid}", type="secondary", use_container_width=True, disabled=(len(target_batch_kws) == 0)):
                             for k in target_batch_kws:
                                 draft_ab[k] = "OK"
                             st.rerun()
                     with b_col2:
-                        btn_ng_label = f"❌ 未判定のみ一括 NG [{len(target_batch_kws)}件]" if is_partial else f"❌ 一括 NG 仮設定 [{len(kws)}件]"
+                        btn_ng_label = f"❌ 残存未判定を一括 NG [{len(active_unclassified_kws)}件]" if is_partial else f"❌ 一括 NG 仮設定 [{len(target_batch_kws)}件]"
                         if st.button(btn_ng_label, key=f"btn_cl_ng_{cid}", type="secondary", use_container_width=True, disabled=(len(target_batch_kws) == 0)):
                             for k in target_batch_kws:
                                 draft_ab[k] = "NG"
@@ -862,9 +849,9 @@ def render_step2a_view(paths: dict):
                         if st.button(f"❔ 一括 未判定リセット", key=f"btn_cl_reset_{cid}", use_container_width=True):
                             for k in kws:
                                 if k in current_ng or k in current_ok:
-                                    draft_ab[k] = "RESET"
+                                     draft_ab[k] = "RESET"
                                 else:
-                                    draft_ab.pop(k, None)
+                                     draft_ab.pop(k, None)
                             st.rerun()
 
                     if not visible_kws_info:
@@ -887,24 +874,27 @@ def render_step2a_view(paths: dict):
                             col_k = cl_cols[idx_k % 3]
                             disp_k = format_about_keyword_display(kw, max_label_len=24)
                             
-                            if eff_kw_cnt == 0:
-                                cnt_badge = f" [残存0件/全{tot_kw_cnt:,}件]"
+                            is_zero_inactive = (eff_kw_cnt == 0 and st_val == "UN" and not is_in_draft)
+
+                            if is_zero_inactive:
+                                cnt_badge = f" [他条件で除外済] (全{tot_kw_cnt:,}件)"
+                                lbl = f"🚫 {disp_k} {cnt_badge}"
+                                tooltip_k = f"【『{disp_k}』 (全{tot_kw_cnt:,}件)】\n※ このキーワードを含む資料は、他条件ですでに全件除外されています（残存0件）。新たなルール設定は不要です。"
                             elif eff_kw_cnt != tot_kw_cnt:
                                 cnt_badge = f" ({eff_kw_cnt:,}件/全{tot_kw_cnt:,}件)"
+                                draft_tag = " [仮]" if is_in_draft else ""
+                                lbl = f"✅ {disp_k}{cnt_badge}{draft_tag}" if st_val == "OK" else (f"❌ {disp_k}{cnt_badge}{draft_tag}" if st_val == "NG" else f"❔ {disp_k}{cnt_badge}{draft_tag}")
+                                tooltip_k = f"【『{disp_k}』 {cnt_badge}】\nクリックで切替 / 右の[⋮]で詳細プレビュー"
                             else:
                                 cnt_badge = f" ({tot_kw_cnt:,}件)"
-
-                            draft_tag = " [仮]" if is_in_draft else ""
-                            if st_val == "OK":
-                                lbl = f"✅ {disp_k}{cnt_badge}{draft_tag}"
-                            elif st_val == "NG":
-                                lbl = f"❌ {disp_k}{cnt_badge}{draft_tag}"
-                            else:
-                                lbl = f"❔ {disp_k}{cnt_badge}{draft_tag}"
+                                draft_tag = " [仮]" if is_in_draft else ""
+                                lbl = f"✅ {disp_k}{cnt_badge}{draft_tag}" if st_val == "OK" else (f"❌ {disp_k}{cnt_badge}{draft_tag}" if st_val == "NG" else f"❔ {disp_k}{cnt_badge}{draft_tag}")
+                                tooltip_k = f"【『{disp_k}』 {cnt_badge}】\nクリックで切替 / 右の[⋮]で詳細プレビュー"
 
                             c_btn_k, c_pop_k = col_k.columns([5.1, 0.9])
                             with c_btn_k:
-                                if st.button(lbl, key=f"tgl_kw_{cid}_{kw}", use_container_width=True):
+                                btn_type_k = "primary" if is_in_draft else "secondary"
+                                if st.button(lbl, key=f"tgl_kw_{cid}_{kw}", disabled=is_zero_inactive, type=btn_type_k, help=tooltip_k, use_container_width=True):
                                     cur_m = st.session_state.get("click_action_about_mode", "NGに設定")
                                     if cur_m == "NGに設定":
                                         if kw in draft_ab and draft_ab[kw] == "NG":
@@ -945,12 +935,6 @@ def render_step2a_view(paths: dict):
                             if st.button(f"クラスタ内の残りのキーワード ({rem_kw_cnt}件) をすべて表示", key=f"btn_more_kws_{cid}", use_container_width=True):
                                 st.session_state[cl_limit_key] = len(visible_kws_info)
                                 st.rerun()
-
-            # 各キーワードのアクティブ残存件数は辞書参照でO(1)
-            def _get_eff_k_cnt(k):
-                if k in matched_ng_kws:
-                    return 0
-                return active_about_counts.get(k, 0) if active_about_counts is not None else about_counts_map.get(k, 0)
 
             def render_cluster_board():
                 display_clusters = []
@@ -1235,6 +1219,12 @@ def render_step2a_view(paths: dict):
             st.session_state["draft_about_changes"] = {}
         draft_ab = st.session_state["draft_about_changes"]
 
+        # インパクトメトリクス情報の構築 (仮選択がある場合のみ)
+        impact_metrics_info = {
+            "discarded_delta": max(0, discarded_records_cnt - comm_discarded_cnt),
+            "remaining_count": remaining_records_cnt
+        } if len(draft_ab) > 0 else None
+
         # 汎用ピルボードコンポーネント呼出
         render_pill_board(
             items=display_ranking,
@@ -1244,7 +1234,8 @@ def render_step2a_view(paths: dict):
             draft_dict=draft_ab,
             click_action_mode=click_action_mode,
             page_session_key="about_single_page",
-            on_confirm_save=_apply_and_save_about_draft
+            on_confirm_save=_apply_and_save_about_draft,
+            impact_metrics=impact_metrics_info
         )
 
         c_hdr1, c_hdr2 = st.columns([3, 2])

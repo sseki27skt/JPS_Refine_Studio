@@ -14,7 +14,8 @@ def render_pill_board(
     page_session_key: str,
     parent_rule_func=None,
     items_per_page: int = 36,
-    on_confirm_save=None
+    on_confirm_save=None,
+    impact_metrics: dict = None
 ):
     """
     キーワード/フレーズのピル（Pill）一覧をインタラクティブかつ爆速描画する汎用コンポーネント
@@ -54,20 +55,31 @@ def render_pill_board(
     # 仮選択件数のバッジ表示
     draft_cnt = len(draft_dict) if isinstance(draft_dict, dict) else 0
 
+    # インパクトメトリクス表示 HTML
+    impact_html = ""
+    if impact_metrics and isinstance(impact_metrics, dict):
+        d_disc = impact_metrics.get("discarded_delta", 0)
+        c_rem = impact_metrics.get("remaining_count")
+        if d_disc > 0:
+            impact_html += f"<span class='status-badge status-badge-reject' style='margin-left: 6px;'>仮除外: -{d_disc:,} 件</span>"
+        if c_rem is not None:
+            impact_html += f"<span class='status-badge status-badge-pass' style='margin-left: 6px;'>残存見込: {c_rem:,} 件</span>"
+
     # 操作・表示ステータスバー（仮選択がある場合はその場で即時確定保存できるボタンを表示）
     if draft_cnt > 0 and on_confirm_save is not None:
-        c_stat, c_save = st.columns([3, 2])
+        c_stat, c_save = st.columns([3.2, 1.8])
         with c_stat:
             st.markdown(
                 f"<div class='facet-status-bar'>"
                 f"<span class='facet-counter'>表示中: {cur_limit:,} 件 ／ 全 {total_items:,} 件</span>"
                 f"<span class='facet-draft-indicator'>[仮選択: {draft_cnt} 件]</span>"
+                f"{impact_html}"
                 f"</div>",
                 unsafe_allow_html=True
             )
         with c_save:
             if st.button(
-                f"仮設定 ({draft_cnt}件) を保存", 
+                f"仮設定 ({draft_cnt}件) を確定保存", 
                 key=f"btn_inline_save_{page_session_key}", 
                 type="primary", 
                 use_container_width=True
@@ -79,6 +91,7 @@ def render_pill_board(
             f"<div class='facet-status-bar'>"
             f"<span class='facet-counter'>表示中: {cur_limit:,} 件 ／ 全 {total_items:,} 件</span>"
             f"{draft_html}"
+            f"{impact_html}"
             f"<span class='facet-hint'>スクロールで追加読み込み</span>"
             f"</div>", 
             unsafe_allow_html=True
@@ -115,23 +128,6 @@ def render_pill_board(
             from components.ndc_utils import format_about_keyword_display
             disp_w = format_about_keyword_display(w, max_label_len=24)
 
-            cnt_str = f"({cnt}件)" if eff_c == cnt else f"(未判定 {eff_c}件 / 全{cnt}件)"
-
-            # ツールチップ用テキスト (最大2件のコンパクトプレビュー)
-            sample_titles = []
-            for s in display_samples[:2]:
-                if isinstance(s, dict):
-                    sample_titles.append(s.get("title", ""))
-                else:
-                    sample_titles.append(str(s))
-
-            sample_lines = [f"• {t[:40]}..." if len(t) > 40 else f"• {t}" for t in sample_titles if t]
-            sample_header = f"【『{disp_w}』 {cnt_str}】\n"
-            if sample_lines:
-                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※クリックで切替 / 右の[⋮]でプレビュー"
-            else:
-                tooltip_txt = sample_header + f"クリックで切替 / 現在アクション: 【{click_action_mode}】"
-
             # ドラフト ＆ 既存ルールのステータス判定
             draft_status = draft_dict.get(w)
             if draft_status == "NG":
@@ -148,6 +144,35 @@ def render_pill_board(
                 is_ok = w in current_ok
                 d_tag = ""
 
+            # 他条件ですでに除外され、現在の未判定残存件数が0件のキーワードの検知
+            is_zero_remaining_unclassified = (
+                eff_c == 0 and not is_ng and not is_ok and draft_status is None and parent_type is None
+            )
+
+            if is_zero_remaining_unclassified:
+                cnt_str = f"[他条件で除外済] (全{cnt}件)"
+            elif eff_c == cnt:
+                cnt_str = f"({cnt}件)"
+            else:
+                cnt_str = f"(未判定 {eff_c}件 / 全{cnt}件)"
+
+            # ツールチップ用テキスト (最大2件のコンパクトプレビュー)
+            sample_titles = []
+            for s in display_samples[:2]:
+                if isinstance(s, dict):
+                    sample_titles.append(s.get("title", ""))
+                else:
+                    sample_titles.append(str(s))
+
+            sample_lines = [f"• {t[:40]}..." if len(t) > 40 else f"• {t}" for t in sample_titles if t]
+            sample_header = f"【『{disp_w}』 {cnt_str}】\n"
+            if is_zero_remaining_unclassified:
+                tooltip_txt = sample_header + "※ このキーワードを含む資料は、前段のデータ種別除外や他条件ですでに全件除外されています（残存0件）。新たなルール設定は不要です。"
+            elif sample_lines:
+                tooltip_txt = sample_header + "\n".join(sample_lines) + "\n※クリックで切替 / 右の[⋮]でプレビュー"
+            else:
+                tooltip_txt = sample_header + f"クリックで切替 / 現在アクション: 【{click_action_mode}】"
+
             if is_ng:
                 btn_label = f"❌ {disp_w} {cnt_str}{d_tag}"
             elif is_ok:
@@ -156,6 +181,8 @@ def render_pill_board(
                 btn_label = f"❌ {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
             elif parent_type == "OK":
                 btn_label = f"✅ {disp_w} [親:{parent_word}] {cnt_str}{d_tag}"
+            elif is_zero_remaining_unclassified:
+                btn_label = f"🚫 {disp_w} {cnt_str}"
             else:
                 btn_label = f"❔ {disp_w} {cnt_str}{d_tag}"
 
@@ -192,13 +219,14 @@ def render_pill_board(
 
             c_btn, c_pop = col.columns([5.1, 0.9])
             with c_btn:
-                # 仮選択中は primary 表示
+                # 仮選択中は primary 表示、他条件で除外済の場合は disabled
                 btn_type = "primary" if draft_status in ("NG", "OK") else "secondary"
                 st.button(
                     btn_label, 
                     key=f"btn_pills_{page_session_key}_{w}", 
                     help=tooltip_txt, 
                     type=btn_type,
+                    disabled=is_zero_remaining_unclassified,
                     use_container_width=True,
                     on_click=_handle_pill_click,
                     args=(w, str(click_action_mode), draft_status, is_ng, is_ok)

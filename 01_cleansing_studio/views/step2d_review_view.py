@@ -20,10 +20,10 @@ from components.guide_card import render_guide_card, render_summary_banner, rend
 
 def _calc_review_sources_signature(paths: dict) -> tuple:
     """査読に関わるソースファイルの更新日時シグネチャを計算"""
+    raw_metadata_path = paths.get('PATH_RAW_METADATA', '')
+    duckdb_path = paths.get('PATH_DUCKDB', os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb") if raw_metadata_path else "")
     files_to_check = [
-        paths.get('PATH_RAW_METADATA'),
-        paths.get('PATH_ABOUT_RULES', '01_cleansing_studio/rules/about_rules.json'),
-        paths.get('PATH_NGRAM_RULES', '01_cleansing_studio/rules/ngram_rules.json'),
+        duckdb_path,
         paths.get('PATH_LLM_JUDGMENTS'),
         paths.get('PATH_VERIFIED_JSONL')
     ]
@@ -57,46 +57,25 @@ def get_or_create_review_db(paths: dict, force_reload: bool = False):
     if DuckDBManager is None:
         return None
 
-    raw_metadata_path = paths['PATH_RAW_METADATA']
-    if not os.path.exists(raw_metadata_path):
+    raw_metadata_path = paths.get('PATH_RAW_METADATA', '')
+    duckdb_path = paths.get("PATH_DUCKDB", os.path.join(os.path.dirname(raw_metadata_path), "metadata_store.duckdb") if raw_metadata_path else "")
+
+    if not duckdb_path or (not os.path.exists(duckdb_path) and not os.path.exists(raw_metadata_path)):
         return None
 
-    # インメモリDBの生成とインポート
-    db = DuckDBManager(":memory:")
-    with st.spinner("DuckDBにメタデータおよび最新判定ログをロード中..."):
-        db.import_jsonl(raw_metadata_path)
+    # 永続化された DuckDB が存在する場合は直接接続 (数ミリ秒)
+    if os.path.exists(duckdb_path):
+        db = DuckDBManager(duckdb_path)
+    else:
+        # 初回未作成時のみ初期化
+        db = DuckDBManager(duckdb_path)
+        with st.spinner("DuckDBにメタデータをインポート中..."):
+            db.import_jsonl(raw_metadata_path)
 
-        # 既存のルール判定結果があれば反映
-        about_rules_path = paths.get('PATH_ABOUT_RULES', '01_cleansing_studio/rules/about_rules.json')
-        ngram_rules_path = paths.get('PATH_NGRAM_RULES', '01_cleansing_studio/rules/ngram_rules.json')
-        import json
-        about_rules = {}
-        if os.path.exists(about_rules_path):
-            try:
-                with open(about_rules_path, 'r', encoding='utf-8') as f:
-                    about_rules = json.load(f)
-            except Exception:
-                pass
-        ngram_rules = {}
-        if os.path.exists(ngram_rules_path):
-            try:
-                with open(ngram_rules_path, 'r', encoding='utf-8') as f:
-                    ngram_rules = json.load(f)
-            except Exception:
-                pass
-
-        if about_rules or ngram_rules:
-            db.apply_rules_fast(about_rules, ngram_rules)
-
-        # LLM判定結果があればマージ
-        llm_judgments_path = paths.get('PATH_LLM_JUDGMENTS')
-        if llm_judgments_path and os.path.exists(llm_judgments_path):
-            db.sync_llm_judgments(llm_judgments_path)
-
-        # 過去の確定査読データ（手動オーバーライド）があれば自動復元
-        verified_jsonl_path = paths.get('PATH_VERIFIED_JSONL')
-        if verified_jsonl_path and os.path.exists(verified_jsonl_path):
-            db.sync_human_decisions(verified_jsonl_path)
+    # 過去の確定査読データ（手動オーバーライド）があれば自動復元
+    verified_jsonl_path = paths.get('PATH_VERIFIED_JSONL')
+    if verified_jsonl_path and os.path.exists(verified_jsonl_path):
+        db.sync_human_decisions(verified_jsonl_path)
 
     st.session_state["duckdb_review_manager"] = db
     st.session_state["duckdb_review_sig"] = _calc_review_sources_signature(paths)
