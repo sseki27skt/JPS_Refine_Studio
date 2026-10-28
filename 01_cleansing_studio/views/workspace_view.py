@@ -76,7 +76,7 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                 if st.button("ワークスペースとして展開・インポート", type="primary", key="btn_init_import", use_container_width=True):
                     temp_dir = os.path.join(wm.data_root, "tmp_imports")
                     os.makedirs(temp_dir, exist_ok=True)
-                    temp_zip = os.path.join(temp_dir, uploaded_file.name)
+                    temp_zip = os.path.join(temp_dir, os.path.basename(uploaded_file.name))
                     with open(temp_zip, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                     try:
@@ -366,7 +366,7 @@ def render_workspace_view(paths: dict, wm: WorkspaceManager):
                     # 一時保存
                     temp_dir = os.path.join(paths["DIR_DATA"], "tmp_imports")
                     os.makedirs(temp_dir, exist_ok=True)
-                    temp_zip = os.path.join(temp_dir, uploaded_file.name)
+                    temp_zip = os.path.join(temp_dir, os.path.basename(uploaded_file.name))
                     with open(temp_zip, "wb") as f:
                         f.write(uploaded_file.getbuffer())
 
