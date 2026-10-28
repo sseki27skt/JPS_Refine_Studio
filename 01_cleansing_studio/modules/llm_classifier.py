@@ -169,7 +169,7 @@ def is_valid_japanese_snippet(text: str) -> bool:
 def fetch_web_fallback_snippet(title_text: str, num_results: int = 5) -> str:
     """
     旧バージョン (integrated_portal) に準拠・強化した DuckDuckGo ＆ Wikipedia 統合検索
-    1. 「{title_text} 古典籍」または「{title_text} とは」でコンテキスト検索
+    1. 「{title_text} とは」でコンテキスト検索
     2. ヒットしなければ「{title_text}」単体で検索
     3. それでもヒットしなければ Wikipedia API を検索
     ※ 厳格な日本語判定により海外ノイズ・スパム掲示板を100%除外します。
@@ -183,7 +183,7 @@ def fetch_web_fallback_snippet(title_text: str, num_results: int = 5) -> str:
 
     # 1. DuckDuckGo 検索 (「タイトル とは」を第1優先)
     if DDGS:
-        queries = [f"{clean_title} とは", f"{clean_title} 古典籍", clean_title]
+        queries = [f"{clean_title} とは",  clean_title]
         for q in queries:
             try:
                 with DDGS() as ddgs:
