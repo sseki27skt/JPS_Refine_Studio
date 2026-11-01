@@ -696,17 +696,18 @@ def _classify_single_item(system_prompt: str, user_prompt: str, provider: str, a
         payload = {
             "model": model,
             "messages": [
-                {"role": "system", "content": f"/no_think\n{system_prompt}"},
+                {"role": "system", "content": f"{system_prompt}"},
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.0,
-            "max_tokens": 500
+            "max_tokens": 500,
+            "reasoning_effort": "none"
         }
 
         for attempt in range(max_retries):
             try:
                 url = f"{api_base.rstrip('/')}/chat/completions"
-                res = requests.post(url, json=payload, headers=req_headers, timeout=30)
+                res = requests.post(url, json=payload, headers=req_headers, timeout=90)
                 if res.status_code == 200:
                     choice_msg = res.json()["choices"][0]["message"]
                     content = choice_msg.get("content") or choice_msg.get("reasoning_content", "")
