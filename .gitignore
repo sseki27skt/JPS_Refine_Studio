@@ -51,9 +51,20 @@ Thumbs.db
 *.swp
 *.swo
 
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm/
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.env
+
 # Large intermediate datasets / Temporary pipeline outputs
 # （軽量なキャッシュ・確定ルール・出力結果以外の大容量中間データを除外）
-data/*.jsonl
+*.jsonl
 !data/confirmed_ok_rules.jsonl
 data/discarded_*.csv
 data/tmp_*.jsonl

@@ -2,8 +2,12 @@
 # JPS-Refine Studio - Python Dependencies
 # =============================================================================
 
-# GUI Application Framework
+# GUI & API Application Frameworks
 streamlit>=1.35.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+sse-starlette>=2.1.0
+pydantic>=2.8.0
 
 # High-Performance Database & Data Analytics Engine
 duckdb>=1.0.0

@@ -1,0 +1,106 @@
+{
+  "001170552": {
+    "status": 200,
+    "label": "三線",
+    "prefLabel": "三線",
+    "yomi": "サンシン",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/001170552"
+  },
+  "00565258": {
+    "status": 200,
+    "label": "歌謡",
+    "prefLabel": "歌謡",
+    "yomi": "Kayo",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00565258"
+  },
+  "00576136": {
+    "status": 200,
+    "label": "笛",
+    "prefLabel": "笛",
+    "yomi": "Fue",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00576136"
+  },
+  "01185937": {
+    "status": 200,
+    "label": "篠笛",
+    "prefLabel": "篠笛",
+    "yomi": "Shinobue",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/01185937"
+  },
+  "00614373": {
+    "status": 200,
+    "label": "民謡--沖縄県",
+    "prefLabel": "民謡--沖縄県",
+    "yomi": "ミンヨウ--オキナワケン",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00614373"
+  },
+  "00614405": {
+    "status": 200,
+    "label": "民謡--新潟県",
+    "prefLabel": "民謡--新潟県",
+    "yomi": "ミンヨウ--ニイガタケン",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00614405"
+  },
+  "00568850": {
+    "status": 200,
+    "label": "音楽--沖縄県",
+    "prefLabel": "音楽--沖縄県",
+    "yomi": "Ongaku--Okinawaken",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00568850"
+  },
+  "00584599": {
+    "status": 200,
+    "label": "音楽 (日本)--歴史",
+    "prefLabel": "音楽 (日本)--歴史",
+    "yomi": "Ongaku (nihon)--Rekishi",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00584599"
+  },
+  "00562195": {
+    "status": 200,
+    "label": "楽譜",
+    "prefLabel": "楽譜",
+    "yomi": "Gakufu",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00562195"
+  },
+  "00566846": {
+    "status": 200,
+    "label": "小唄",
+    "prefLabel": "小唄",
+    "yomi": "コウタ",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00566846"
+  },
+  "00567971": {
+    "status": 200,
+    "label": "長唄",
+    "prefLabel": "長唄",
+    "yomi": "Nagauta",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00567971"
+  },
+  "00570082": {
+    "status": 200,
+    "label": "三味線",
+    "prefLabel": "三味線",
+    "yomi": "サミセン",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00570082"
+  },
+  "00571937": {
+    "status": 200,
+    "label": "尺八",
+    "prefLabel": "尺八",
+    "yomi": "Shakuhachi",
+    "type": "ndlsh",
+    "uri": "http://id.ndl.go.jp/auth/ndlsh/00571937"
+  }
+}

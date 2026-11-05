@@ -1,12 +1,109 @@
-# JPS-Refine Studio (ジャパンサーチ・メタデータ精緻化＆検索スタジオ)
+# JPS-Refine Studio (ジャパンサーチ・メタデータ精緻化＆構造化システム) v2.0
 
-文化資源メタデータ（ジャパンサーチ / Japan Search 等）からノイズを高精度に除外・精緻化し、学術研究やデジタルアーカイブとして活用するための統合研究・開発プラットフォームです。
+文化資源メタデータ（ジャパンサーチ / Japan Search 等）からノイズを高精度に除外・精緻化し、特定主題の高品質サブセットを構築・検証・エクスポートするための統合研究・開発プラットフォームです。
 
-「譜」という文字の多義性（家譜、年譜、画譜などの非音楽資料）を多段階で系統的に排除し、真正な楽譜資料を効率的に抽出・構造化するために開発されました。
+従来の Streamlit ベース（`01_cleansing_studio`）から、**「FastAPI（非同期バックエンド）＋ React 18 SPA（モダンフロントエンド）」** へ全面的にアーキテクチャを刷新しました。
 
 ---
 
-## 🌟 主な特徴とアーキテクチャ
+## 🚀 クイックスタート
+
+### 動作環境
+- **Python**: 3.10 以上 (仮想環境 `.venv` 推奨)
+- **Node.js**: v18 / v20 / v22 (npm)
+
+### 1. 依存パッケージのインストール
+
+```bash
+# 仮想環境作成と Python 依存パッケージのインストール
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+
+# フロントエンド依存パッケージのインストール
+cd frontend
+npm install
+cd ..
+```
+
+### 2. 開発モードでの起動 (ホットリロード対応)
+
+```bash
+./dev.sh
+```
+- **Web UI (React SPA)**: [http://localhost:5173](http://localhost:5173) （変更が即時反映されます）
+- **FastAPI バックエンド**: [http://localhost:8000](http://localhost:8000)
+- **API ドキュメント (Swagger UI)**: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+### 3. 統合本番モードでの起動 (単一ポート 8000)
+
+```bash
+./start.sh
+```
+- **統合 Web UI**: [http://localhost:8000](http://localhost:8000) （ビルド済みSPAとAPIが一体提供されます）
+
+---
+
+## 🌟 v2.0 アーキテクチャと主な改善点
+
+### 1. 完全非同期バックグラウンド化と耐障害性 (JobManager & SSE)
+- 数十万件のSPARQL取得、LLMセマンティック推論、N-gram構築などの重い処理を、FastAPIのAPIリクエストとは非同期のワーカースレッドで実行。
+- 進捗状況（current / total / ETA / status）は **Server-Sent Events (SSE)** で常駐プログレスバーにリアルタイム配信。
+- **ブラウザを閉じたりリロードしてもバックグラウンド処理は中断されず**、再接続時に即座に進捗が復元されます。
+
+### 2. 数十万件のメタデータを高速描画 (サーバーサイド・ページネーション)
+- DuckDB 上で `LIMIT ? OFFSET ?` によるサーバーサイドページネーションを実装。
+- 何万件〜数十万件のメタデータがあっても、必要な50〜100件のみをミリ秒単位で転送・描画するため、UIが極めて軽快に動作します。
+
+### 3. ★ ルール影響レコード完全一覧 ＆ 巻き添え衝突警告 (セーフティガード)
+- 各フィルタリング条件（Type / NDC・典拠 / N-gram接尾辞）の影響を受ける全レコードを、**上限打ち切りなし（51件目以降も完全スクロール可能）** で一覧確認できます。
+- すでに専門家査読やルールで「確定OK」となっている重要資料が巻き添え除外されるリスクを検知する**「衝突警告タブ」**を標準装備。
+
+### 4. Web NDL Authorities SPARQL への完全統合
+- 外部非公式APIを完全廃止し、国立国会図書館の公式 SPARQL エンドポイント（`https://id.ndl.go.jp/auth/ndla/sparql`）に直接統合。
+- NDC（日本十進分類法）、NDLC、NDLNAの公的普通件名ラベルを一括バッチ解決し、高速キャッシュ。
+
+### 5. 高度クラスタリング ＆ 専門家査読ポータル
+- **NDC 3段階階層ツリー**: 類(1桁) → 綱(2桁) → 目(3桁) の階層アコーディオン。
+- **タイトルN-gram接尾辞クラスタリング**: 「〜譜」「〜集」「〜録」「〜記」など末尾の定型表現による類似文献グループ化。
+- **爆速査読ポータル**: キーボードショートカット（`J`/`K`で移動、`A`で採択、`D`で除外）と楽観的UI更新（Optimistic UI）により、秒間複数件の判定が可能。
+
+---
+
+## 📂 ディレクトリ構成
+
+```text
+JPS_Refine_Studio/
+├── backend/                       # FastAPI バックエンド
+│   ├── app/
+│   │   ├── main.py                # FastAPI エントリーポイント
+│   │   ├── config.py              # ディレクトリ・環境設定
+│   │   ├── api/                   # REST API ルーター
+│   │   ├── schemas/               # Pydantic スキーマ
+│   │   ├── services/              # ビジネスロジック & JobManager
+│   │   └── modules/               # 確立された DuckDB・クレンジングモジュール群
+│   ├── requirements.txt           # Python 依存関係
+│   └── run.py                     # バックエンド起動スクリプト
+│
+├── frontend/                      # React SPA (Vite + TypeScript + Tailwind CSS)
+│   ├── src/
+│   │   ├── api/client.ts          # API クライアント
+│   │   ├── hooks/                 # useJobStatus (SSE), useWorkspace 等
+│   │   ├── components/            # ヘッダー, サイドバー, プログレスバー, 影響ドロワー
+│   │   └── views/                 # 各ステップ画面 (Dashboard, Fetch, Filter, Review, Export)
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── data/workspaces/               # テーマ別ワークスペース (DuckDB, ルール, 確定成果物)
+├── docs/                          # 実装計画書・タスク管理・ウォークスルー
+├── dev.sh                         # 開発用一括起動スクリプト (HMR)
+├── start.sh                       # 本番用統合起動スクリプト (Port 8000)
+└── 01_cleansing_studio/           # (旧 Streamlit 実装 / 比較・検証用として温存)
+```
+
+---
+
+## 🌟 主な特徴とアーキテクチャ (機能詳細)
 
 ### 1. 多段階ハイブリッド・クレンジングパイプライン (`01_cleansing_studio`)
 - **Step 1: データ収集 ＆ バックグラウンド非同期ワーカー**:
