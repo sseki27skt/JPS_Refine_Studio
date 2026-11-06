@@ -1,3 +1,7 @@
+# =============================================================================
+# JPS Refine Studio - Git Ignore Configuration
+# =============================================================================
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -31,6 +35,12 @@ venv/
 ENV/
 env/
 
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.npm/
+
 # Streamlit logs & cache
 01_cleansing_studio/logs/*.log
 logs/*.log
@@ -51,44 +61,34 @@ Thumbs.db
 *.swp
 *.swo
 
-# Node / Frontend
-node_modules/
-frontend/node_modules/
-frontend/dist/
-.npm/
-
 # Environment Variables & Secrets
 .env
 .env.*
 *.env
 
-# Large intermediate datasets / Temporary pipeline outputs
-# （軽量なキャッシュ・確定ルール・出力結果以外の大容量中間データを除外）
+# =============================================================================
+# Large Metadata & Database Files (ジャパンサーチ取得データ・バイナリの完全除外)
+# =============================================================================
 *.jsonl
-!data/confirmed_ok_rules.jsonl
-data/discarded_*.csv
-data/tmp_*.jsonl
-data/test_build.jsonl
-data/raw_metadata.jsonl
-data/type_filtered.jsonl
-data/about_filtered.jsonl
-data/ngram_filtered.jsonl
-data/target_for_llm.jsonl
-data/llm_judgments.jsonl
-
-# Database files & Runtime job status
+*.jsonl.*
 *.duckdb
 *.duckdb.wal
+scores.jsonl
+
+# Pipeline temporary outputs & intermediate datasets
+data/*.csv
+data/discarded_*.csv
+data/benchmark_llm_200/
 data/benchmark_tmp/
 data/fetch_job_status.json
 data/fetch_job_status.json.tmp
-
-# Archive large datasets & Workspaces runtime data
+data/workspaces/
 archive/data/
-data/workspaces/*/data/
-data/workspaces/*/snapshots/
-data/workspaces/*/exports/
+
+# Whitelist: システム稼働に必要な軽量APIキャッシュ・辞書のみ許可
+!data/ndc_api_cache.json
+!data/ndlna_api_cache.json
+!data/ndlc_api_cache.json
 
 # Documentation
 !docs/
-
