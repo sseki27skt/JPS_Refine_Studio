@@ -57,6 +57,17 @@ def load_merged_review_data(
                     except Exception:
                         pass
 
+    suffix_passed_ids = set()
+    if suffix_filtered_path and os.path.exists(suffix_filtered_path):
+        with open(suffix_filtered_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        item = json.loads(line)
+                        suffix_passed_ids.add(item.get("@id", item.get("id", "")))
+                    except Exception:
+                        pass
+
     # LLM判定結果のマップ
     llm_map = {}
     if llm_judgments_path and os.path.exists(llm_judgments_path):
@@ -88,6 +99,7 @@ def load_merged_review_data(
             is_type_ok = item_id in type_passed_ids if type_passed_ids else True
             is_about_ok = item_id in about_passed_ids if about_passed_ids else True
             is_ngram_ok = item_id in ngram_passed_ids if ngram_passed_ids else True
+            is_suffix_ok = item_id in suffix_passed_ids if suffix_passed_ids else True
             
             llm_info = llm_map.get(item_id, {})
             llm_target = llm_info.get("is_target")
@@ -107,6 +119,9 @@ def load_merged_review_data(
             if not is_ngram_ok:
                 final_status = "除外"
                 reasons.append("タイトルルール除外")
+            if not is_suffix_ok:
+                final_status = "除外"
+                reasons.append("接尾辞ルール除外")
 
             if llm_target is False:
                 final_status = "除外"
@@ -130,6 +145,7 @@ def load_merged_review_data(
                 "is_type_ok": is_type_ok,
                 "is_about_ok": is_about_ok,
                 "is_ngram_ok": is_ngram_ok,
+                "is_suffix_ok": is_suffix_ok,
                 "llm_target": llm_target,
                 "llm_reason": llm_reason,
                 "external_info": external_info,
